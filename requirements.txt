@@ -1,0 +1,4 @@
+paho-mqtt>=1.6.1
+opencv-python-headless>=4.9.0
+# Opcional para leitura real de DHT22 no Raspberry Pi:
+# adafruit-circuitpython-dht>=3.0.0

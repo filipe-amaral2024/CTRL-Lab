@@ -397,3 +397,59 @@ O principal diferencial do projeto está na **integração de diferentes tecnolo
 O CRTL-Lab é um **protótipo acadêmico** e não deve ser considerado um sistema certificado de segurança ou substituto de equipamentos profissionais de prevenção e combate a incêndio.
 
 Os sensores e modelos de inteligência artificial devem ser utilizados como mecanismos de demonstração e apoio à detecção de situações de risco.
+
+---
+
+## 12. Desenvolvimento inicial do Raspberry
+
+A base do módulo Raspberry já foi iniciada no diretório `raspberry_pi/` com:
+
+- leitura de sensores ambientais;
+- gerenciamento de estados do sistema (`NORMAL`, `WARNING`, `ALERT`, `EMERGENCY`);
+- controle de LEDs e buzzer/sirene em abstração de hardware;
+- suporte a modo mock para testes sem hardware físico;
+- preparação para comunicação MQTT com o computador central.
+
+### Execução em modo mock
+
+```bash
+cd /home/filipe/Projects/CTRL-Lab
+python3 raspberry_pi/main.py --mock --cycles 2
+```
+
+Esse comando valida a lógica do sistema e permite verificar a transição entre estados sem necessidade do Raspberry Pi real.
+
+---
+
+## 13. Fase 1 — Testar a primeira câmera IP
+
+A primeira implementação de aquisição de vídeo foi criada em [app/cameras/entry_camera.py](app/cameras/entry_camera.py), com suporte a:
+
+- stream IP do smartphone em HTTP/RTSP;
+- câmera local do computador;
+- configuração inicial de largura, altura e FPS;
+- leitura de frames com OpenCV.
+
+Exemplo de uso:
+
+```python
+from app.cameras.entry_camera import CameraConfig, StreamCamera
+
+camera = StreamCamera(
+    CameraConfig(
+        name="entry",
+        url="http://192.168.0.10:8080/video",
+        width=1280,
+        height=720,
+        fps=30,
+    )
+)
+
+camera.open()
+frame = camera.read_frame()
+print(frame is not None)
+camera.close()
+```
+
+Esse módulo serve como base para testar a transmissão do smartphone e abrir o fluxo do vídeo no computador, conforme previsto no plano do projeto.
+
