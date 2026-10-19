@@ -8,7 +8,7 @@ A proposta combina **visão computacional, inteligência artificial, sensores am
 
 O sistema utiliza duas câmeras — neste projeto, **smartphones funcionando como câmeras IP** — e um **Raspberry Pi 3B+** para integração com sensores e dispositivos de alerta.
 
-O processamento pesado de visão computacional é realizado em um computador/notebook, enquanto o Raspberry Pi atua como unidade de aquisição de sensores e controle de dispositivos físicos.
+As câmeras IP são analisadas diretamente pelo Raspberry Pi. O computador não executa os modelos: fica responsável pela interface gráfica, pela visualização dos streams e pelo histórico de eventos recebido via MQTT.
 
 ---
 
@@ -104,40 +104,12 @@ Quando uma situação inadequada for detectada, o sistema poderá:
 ## 4. Arquitetura do sistema
 
 ```text
-                 ┌──────────────────────┐
-                 │ Smartphone 1         │
-                 │ Câmera de entrada    │
-                 └──────────┬───────────┘
-                            │
-                            ▼
-                 ┌──────────────────────┐
-                 │ Notebook / Computador│
-                 │                      │
-                 │ OpenCV               │
-                 │ YOLO / IA            │
-                 │ Análise de EPIs      │
-                 │ Detecção de fumaça   │
-                 │ Motor de decisões    │
-                 │ Dashboard             │
-                 └──────────┬───────────┘
-                            │
-                     MQTT / HTTP
-                            │
-                            ▼
-                 ┌──────────────────────┐
-                 │ Raspberry Pi 3B+     │
-                 │                      │
-                 │ Sensores             │
-                 │ LEDs                 │
-                 │ Buzzer               │
-                 │ Sirene               │
-                 └──────────────────────┘
-                            ▲
-                            │
-                 ┌──────────┴───────────┐
-                 │ Smartphone 2         │
-                 │ Câmera do laboratório│
-                 └──────────────────────┘
+Smartphones ── stream IP ──► Raspberry Pi 3B+
+                                  │ OpenCV DNN + YOLO ONNX
+                                  │ Decisão + sensores + alarmes
+                                  │
+                                  └── MQTT ──► Computador (interface + SQLite)
+       └──────── stream IP ─────────────────► Computador (visualização)
 ```
 
 ### Divisão das responsabilidades
@@ -147,21 +119,17 @@ Quando uma situação inadequada for detectada, o sistema poderá:
 - Transmissão das imagens pela rede.
 
 **Notebook/Computador**
-- Processamento das imagens.
-- Execução dos modelos de IA.
-- Análise de EPIs.
-- Detecção de fumaça/incêndio.
-- Motor de decisões.
-- Dashboard.
-- Banco de dados.
-- Comunicação com o Raspberry Pi.
+- Interface gráfica e visualização dos streams IP.
+- Recepção de status e eventos via MQTT.
+- Histórico local de eventos em SQLite.
 
 **Raspberry Pi 3B+**
+- Captura dos streams IP e execução dos modelos de IA em CPU.
+- Análise de EPIs e detecção visual de fumaça/incêndio.
 - Leitura dos sensores.
 - Controle de LEDs.
 - Controle de buzzer/sirene.
-- Comunicação com o computador.
-- Possibilidade de manter algumas regras críticas de segurança funcionando localmente.
+- Decisão e acionamento local dos alertas, sem depender do computador.
 
 ---
 
@@ -170,8 +138,8 @@ Quando uma situação inadequada for detectada, o sistema poderá:
 ### Software
 
 - Python
-- OpenCV
-- Ultralytics YOLO
+- OpenCV DNN (inferência CPU no Raspberry)
+- YOLOv8 exportado em ONNX
 - MQTT
 - SQLite
 - FastAPI ou Flask
@@ -194,12 +162,12 @@ Quando uma situação inadequada for detectada, o sistema poderá:
 
 ## 6. Inteligência artificial
 
-O projeto não pretende desenvolver uma rede neural do zero.
+O projeto não pretende desenvolver uma rede neural do zero. O Raspberry executa um modelo YOLOv8 ONNX pequeno pelo OpenCV DNN, em CPU, com resolução e intervalo de inferência configuráveis.
 
 Serão utilizadas bibliotecas e modelos existentes, principalmente:
 
-- **OpenCV** para aquisição e processamento das imagens.
-- **YOLO/Ultralytics** para detecção de objetos.
+- **OpenCV DNN** para inferência local com o modelo YOLOv8 ONNX.
+- **Ultralytics**, opcional na máquina de desenvolvimento, para exportar modelos treinados.
 
 Inicialmente poderão ser utilizados modelos pré-treinados para validar a infraestrutura.
 
@@ -419,6 +387,39 @@ python3 raspberry_pi/main.py --mock --cycles 2
 
 Esse comando valida a lógica do sistema e permite verificar a transição entre estados sem necessidade do Raspberry Pi real.
 
+### Execução da visão no Raspberry Pi
+
+O Pi deve alcançar os streams dos smartphones pela rede. Configure um broker MQTT no Pi (por exemplo, Mosquitto), mantenha as URLs IP das câmeras acessíveis e copie o modelo ONNX para o Raspberry.
+
+Instale as dependências Python em um ambiente virtual no Raspberry:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Exemplo de execução no Pi com as duas câmeras:
+
+```bash
+python3 -m raspberry_pi.main \
+  --broker localhost \
+  --entry-camera http://192.168.0.10:8080/video \
+  --lab-camera http://192.168.0.11:8080/video \
+  --ai-model models/ctrlab-yolov8n.onnx \
+  --ai-classes person,lab_coat,safety_glasses,closed_shoes,tied_hair,smoke,fire \
+  --image-size 320 \
+  --inference-interval 3
+```
+
+O modelo deve ser YOLOv8 em ONNX com saída sem NMS no formato `[1, 4 + número_de_classes, candidatos]`. Os nomes e a ordem de `--ai-classes` precisam corresponder exatamente às classes usadas no treinamento. Um modelo COCO genérico não reconhece automaticamente jaleco, óculos, calçados, cabelo preso, fumaça ou fogo: use um modelo treinado para essas classes. Para exportar, em uma máquina de desenvolvimento com Ultralytics instalado:
+
+```bash
+yolo export model=best.pt format=onnx imgsz=320
+```
+
+O Pi não precisa instalar PyTorch ou Ultralytics para executar o modelo. Estados e detecções são publicados no tópico `ctrlab/raspberry/status`; o computador pode consumi-los para a interface e o histórico sem executar inferência. A interface gráfica em si continua sendo uma etapa pendente.
+
 ---
 
 ## 13. Fase 1 — Testar a primeira câmera IP
@@ -451,5 +452,4 @@ print(frame is not None)
 camera.close()
 ```
 
-Esse módulo serve como base para testar a transmissão do smartphone e abrir o fluxo do vídeo no computador, conforme previsto no plano do projeto.
-
+Esse módulo pode ser usado pela interface gráfica para exibir diretamente o stream do smartphone. A mesma URL é consumida pelo Raspberry para inferência; o computador não processa os frames.

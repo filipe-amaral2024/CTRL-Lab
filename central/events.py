@@ -23,6 +23,20 @@ class SystemEvent:
         elif float(payload.get("gas_ppm", 0.0) or 0.0) >= 0.7:
             event_type = "SENSOR"
             description = "Gás em nível crítico"
+        elif (
+            isinstance(payload.get("vision"), dict)
+            and isinstance(payload["vision"].get("lab"), dict)
+            and payload["vision"]["lab"].get("risk") == "EMERGENCY"
+        ):
+            event_type = "VISION"
+            description = "Fumaça ou incêndio detectado pela câmera"
+        elif (
+            isinstance(payload.get("vision"), dict)
+            and isinstance(payload["vision"].get("entry"), dict)
+            and payload["vision"]["entry"].get("status") == "ALERTA"
+        ):
+            event_type = "EPI"
+            description = "EPI inadequado detectado na entrada"
         elif state in {"ALERT", "WARNING", "EMERGENCY"}:
             event_type = "SENSOR"
             description = "Leitura ambiental fora do normal"

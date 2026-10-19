@@ -40,6 +40,28 @@ class EventStoreTests(unittest.TestCase):
         self.assertEqual(event.state, "EMERGENCY")
         self.assertTrue(event.details["smoke_detected"])
 
+    def test_vision_emergency_has_specific_event_description(self):
+        event = SystemEvent.from_payload(
+            {
+                "state": "EMERGENCY",
+                "vision": {"lab": {"risk": "EMERGENCY"}},
+            }
+        )
+
+        self.assertEqual(event.event_type, "VISION")
+        self.assertEqual(event.description, "Fumaça ou incêndio detectado pela câmera")
+
+    def test_missing_ppe_has_specific_event_description(self):
+        event = SystemEvent.from_payload(
+            {
+                "state": "ALERT",
+                "vision": {"entry": {"status": "ALERTA"}},
+            }
+        )
+
+        self.assertEqual(event.event_type, "EPI")
+        self.assertEqual(event.description, "EPI inadequado detectado na entrada")
+
 
 if __name__ == "__main__":
     unittest.main()

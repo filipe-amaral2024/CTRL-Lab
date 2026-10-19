@@ -14,7 +14,7 @@
 #### iPhone: Camo
 - Boa alternativa para iPhone.
 - Também funciona como câmera IP pela rede local.
-- Útil quando o notebook e o celular estiverem na mesma Wi‑Fi.
+- Útil quando o Raspberry, o computador e o celular estiverem na mesma Wi‑Fi.
 
 ### Alternativa
 
@@ -24,7 +24,7 @@
 
 ### Regras práticas
 
-- Conectar celular e notebook na mesma rede Wi‑Fi.
+- Conectar celulares, Raspberry Pi e computador de interface à mesma rede Wi‑Fi.
 - Verificar a URL de stream antes de começar a integração.
 - Testar a estabilidade antes de conectar à lógica do sistema.
 
@@ -142,26 +142,44 @@ Esse sensor permite medir:
 ## 5. Estrutura lógica da montagem
 
 ```text
-Celular 1 (entrada) ── Wi‑Fi ── Notebook
-Celular 2 (laboratório) ── Wi‑Fi ── Notebook
+Celular 1 (entrada) ── rede IP ──┐
+Celular 2 (laboratório) ── rede IP ─┼── Raspberry Pi (IA local)
+                                   └── Computador (interface)
 
-Notebook:
-- OpenCV
-- YOLO
-- lógica de EPI
-- visão para fumaça/incêndio
-- comunicação MQTT
+Computador:
+- Interface gráfica e visualização dos streams IP
+- Recepção de eventos via MQTT
+- Histórico SQLite
 
 Raspberry Pi:
+- OpenCV DNN + modelo YOLOv8 ONNX em CPU
+- Inferência de EPI e fumaça/incêndio
 - DHT22
 - MQ-2/MQ-135
 - LEDs
 - buzzer
 - botão de emergência
-- status via MQTT
+- status e eventos via MQTT
 ```
 
 ---
+
+### Execução do modelo no Pi
+
+O Pi precisa alcançar as URLs dos celulares e ter o arquivo ONNX copiado localmente. Instale no Pi apenas as dependências Python de [requirements.txt](../requirements.txt); não é necessário instalar Ultralytics nem PyTorch para inferência. Ultralytics pode ser usado em outro computador apenas para exportar um modelo YOLOv8 em formato ONNX com `imgsz=320`.
+
+Exemplo:
+
+```bash
+python3 -m raspberry_pi.main \
+  --broker localhost \
+  --entry-camera http://192.168.0.10:8080/video \
+  --lab-camera http://192.168.0.11:8080/video \
+  --ai-model models/ctrlab-yolov8n.onnx \
+  --ai-classes person,lab_coat,safety_glasses,closed_shoes,tied_hair,smoke,fire
+```
+
+O modelo deve conter as classes informadas, na mesma ordem, e gerar a saída YOLOv8 sem NMS suportada pelo OpenCV DNN. O projeto fornece o runtime e a lógica, mas não inclui os pesos treinados. O MQTT publica resultados no tópico `ctrlab/raspberry/status`.
 
 ## 6. Ordem recomendada de montagem
 
@@ -171,8 +189,9 @@ Raspberry Pi:
 4. Integrar sensor de gás e validar leitura.
 5. Conectar botão de emergência.
 6. Validar comunicação MQTT.
-7. Conectar câmeras e testar streams.
-8. Adicionar lógica de IA e segurança.
+7. Conectar câmeras e verificar se o Raspberry e o computador alcançam os streams.
+8. Copiar o modelo ONNX para o Pi e validar a inferência local.
+9. Configurar o broker e conectar a interface gráfica ao status MQTT.
 
 ---
 

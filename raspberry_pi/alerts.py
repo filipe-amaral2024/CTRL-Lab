@@ -36,11 +36,21 @@ class AlertManager:
 
         return SystemState.NORMAL
 
-    def update(self, reading):
+    def update(self, reading, vision_state=None, vision_details=None):
         new_state = self.evaluate(reading)
+        if vision_state is not None:
+            priorities = {
+                SystemState.NORMAL: 0,
+                SystemState.WARNING: 1,
+                SystemState.ALERT: 2,
+                SystemState.EMERGENCY: 3,
+            }
+            if priorities[vision_state] > priorities[new_state]:
+                new_state = vision_state
+
         self.state = new_state
         self._apply_hardware(new_state)
-        self._publish_status(reading, new_state)
+        self._publish_status(reading, new_state, vision_details)
         return new_state
 
     def _apply_hardware(self, state):
@@ -72,7 +82,7 @@ class AlertManager:
             self.gpio.set_buzzer(True)
             self.gpio.set_siren(True)
 
-    def _publish_status(self, reading, state):
+    def _publish_status(self, reading, state, vision_details=None):
         if self.mqtt_client is None:
             return
 
@@ -83,6 +93,8 @@ class AlertManager:
             "gas_ppm": reading.gas_ppm,
             "smoke_detected": reading.smoke_detected,
         }
+        if vision_details is not None:
+            payload["vision"] = vision_details
 
         try:
             self.mqtt_client.publish(self.config.status_topic, json.dumps(payload), qos=1)

@@ -62,6 +62,27 @@ class AlertManagerTests(unittest.TestCase):
         self.assertEqual(payload["state"], "ALERT")
         self.assertEqual(payload["temperature_c"], 31.0)
 
+    def test_visual_emergency_overrides_normal_sensor_state(self):
+        reading = EnvironmentReading(
+            temperature_c=24.0,
+            humidity_pct=50.0,
+            gas_ppm=0.1,
+            smoke_detected=False,
+        )
+        mqtt = DummyMQTT()
+        manager = AlertManager(self.config, mqtt_client=mqtt)
+        vision = {"lab": {"risk": "EMERGENCY"}}
+
+        state = manager.update(
+            reading,
+            vision_state=SystemState.EMERGENCY,
+            vision_details=vision,
+        )
+
+        self.assertEqual(state, SystemState.EMERGENCY)
+        payload = json.loads(mqtt.messages[0]["payload"])
+        self.assertEqual(payload["vision"], vision)
+
 
 if __name__ == "__main__":
     unittest.main()

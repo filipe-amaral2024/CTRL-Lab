@@ -62,7 +62,7 @@ Projeto inicial organizado e pronto para receber os módulos.
 
 ## Objetivo
 
-Fazer um smartphone transmitir vídeo e fazer o computador receber esse vídeo.
+Fazer um smartphone transmitir vídeo para a rede e permitir que o Raspberry Pi e a interface gráfica acessem o stream.
 
 ## Fluxo
 
@@ -70,18 +70,14 @@ Fazer um smartphone transmitir vídeo e fazer o computador receber esse vídeo.
 Smartphone
     ↓
 Rede Wi-Fi
-    ↓
-Notebook
-    ↓
-OpenCV
-    ↓
-Janela de vídeo
+    ├── Raspberry Pi → OpenCV DNN e inferência
+    └── Computador → visualização na interface
 ```
 
 ## Tarefas
 
 - [ ] Escolher aplicativo para transformar o smartphone em câmera IP.
-- [ ] Conectar smartphone e notebook à mesma rede.
+- [ ] Conectar os smartphones, o Raspberry e o computador à mesma rede.
 - [ ] Obter URL do stream.
 - [ ] Abrir o stream usando OpenCV.
 - [ ] Exibir o vídeo.
@@ -90,7 +86,7 @@ Janela de vídeo
 
 ## Critério de conclusão
 
-O vídeo da câmera deve aparecer continuamente no computador.
+O Raspberry deve conseguir capturar frames para inferência e o computador deve conseguir exibir o stream na interface.
 
 Este é o primeiro marco importante do projeto.
 
@@ -133,7 +129,7 @@ Fumaça/incêndio
 
 ## Critério de conclusão
 
-As duas câmeras devem funcionar sem comprometer excessivamente o desempenho do computador.
+As duas câmeras devem funcionar no Raspberry, com inferência limitada por intervalo e resolução para respeitar os recursos do Pi.
 
 ---
 
@@ -141,40 +137,39 @@ As duas câmeras devem funcionar sem comprometer excessivamente o desempenho do 
 
 ## Objetivo
 
-Validar a inteligência artificial antes de criar o modelo personalizado.
+Validar a inteligência artificial no Raspberry antes de criar o modelo personalizado.
 
 ## Fluxo
 
 ```text
-Câmera
+Smartphone / stream IP
   ↓
 OpenCV
   ↓
-YOLO pré-treinado
+YOLOv8 ONNX pelo OpenCV DNN (CPU no Raspberry)
   ↓
 Pessoa detectada
 ```
 
 ## Tarefas
 
-- [ ] Instalar Ultralytics.
-- [ ] Baixar um modelo YOLO pequeno.
-- [ ] Executar inferência em imagens.
-- [ ] Executar inferência em vídeo.
+- [ ] Exportar um modelo YOLOv8 pequeno para ONNX em uma máquina de desenvolvimento.
+- [ ] Copiar o ONNX para o Raspberry.
+- [ ] Executar inferência no Raspberry com OpenCV DNN.
 - [ ] Detectar pessoas.
 - [ ] Exibir bounding boxes.
 - [ ] Medir FPS.
-- [ ] Medir uso de CPU/RAM.
+- [ ] Medir uso de CPU/RAM no Raspberry.
 
 ## Critério de conclusão
 
-O sistema deve conseguir detectar uma pessoa em tempo real ou próximo disso.
+O Raspberry deve detectar classes em frames da câmera sem depender do computador para inferência.
 
 ## Observação
 
-Não começar treinando um modelo próprio.
+Ultralytics é usado somente na máquina de desenvolvimento para exportação; no Raspberry a inferência usa OpenCV DNN e ONNX, sem PyTorch.
 
-Primeiro é necessário provar que toda a infraestrutura de captura → processamento → detecção funciona.
+O processamento embarcado requer um ONNX YOLOv8 com as classes adequadas; o modelo COCO genérico não reconhece EPIs, fumaça ou fogo.
 
 ---
 
@@ -357,7 +352,7 @@ raspberry/
 
 ---
 
-# 10. Fase 8 — Comunicação Raspberry ↔ Notebook
+# 10. Fase 8 — Comunicação Raspberry ↔ Interface gráfica
 
 ## Objetivo
 
@@ -371,21 +366,20 @@ O MQTT é adequado porque permite comunicação leve entre dispositivos.
 
 ## Exemplo de tópicos
 
-### Raspberry → Notebook
+### Raspberry → computador de interface
 
 ```text
-labsafe/sensors/temperature
-labsafe/sensors/gas
-labsafe/sensors/smoke
+ctrlab/raspberry/status
+ctrlab/raspberry/alerts
 ```
 
-### Notebook → Raspberry
+### Computador → Raspberry
 
 ```text
-labsafe/alarm
-labsafe/status
-labsafe/led
+ctrlab/central/commands
 ```
+
+O broker MQTT pode rodar no Raspberry. O computador recebe eventos e status; as decisões de visão e os alertas físicos não dependem dele.
 
 ## Exemplo de fluxo
 
@@ -393,20 +387,12 @@ labsafe/led
 Sensor de gás
       ↓
 Raspberry Pi
+      ↑
+ Câmeras IP + IA
       ↓
 MQTT
       ↓
-Notebook
-      ↓
-Motor de decisão
-      ↓
-EMERGÊNCIA
-      ↓
-MQTT
-      ↓
-Raspberry Pi
-      ↓
-Sirene
+Computador (interface e histórico)
 ```
 
 ## Critério de conclusão
@@ -555,7 +541,7 @@ estado
 
 ## Objetivo
 
-Criar uma interface visual para apresentação e monitoramento.
+Criar no computador uma interface visual para apresentação e monitoramento. A interface não deve executar modelos nem lógica de inferência.
 
 ## Elementos sugeridos
 
@@ -683,6 +669,7 @@ Não otimizar prematuramente.
 - Reduzir resolução dos streams.
 - Reduzir quantidade de frames processados.
 - Utilizar modelos YOLO menores.
+- Ajustar `--image-size` e `--inference-interval` para a capacidade do Pi.
 - Processar apenas regiões relevantes.
 - Evitar inferência quando não há pessoas.
 - Melhorar comunicação MQTT.
@@ -810,33 +797,21 @@ A primeira versão funcional deve ser:
 ```text
 Smartphone
     ↓
-OpenCV
+Raspberry Pi (OpenCV DNN + YOLO ONNX)
     ↓
-YOLO
+Análise de EPI / fogo / fumaça
     ↓
-Pessoa
+Decisão e alarme locais
     ↓
-Análise de EPI
-    ↓
-Decisão
-    ↓
-Alerta
+MQTT → interface gráfica no computador
 ```
 
 Depois:
 
 ```text
-                 ┌→ Câmera 1 → EPI
-Smartphones ─────┤
-                 └→ Câmera 2 → Fumaça/Fogo
-                           ↓
-                     Motor de decisão
-                           ↑
-                     Sensores
-                           ↑
-                     Raspberry Pi
-                           ↓
-                    Alarmes físicos
+Smartphones → Raspberry Pi → IA + sensores → decisão/alarme locais
+                    │
+                    └── MQTT → computador (interface e histórico)
 ```
 
 ---
@@ -868,19 +843,13 @@ Exemplo completo:
 ```text
 Câmera detecta fumaça
         ↓
-Modelo identifica fumaça
+Modelo no Raspberry identifica fumaça
         ↓
-Sistema classifica como emergência
+Raspberry classifica como emergência e aciona a sirene
         ↓
-Evento é registrado
+Evento MQTT é recebido e registrado no computador
         ↓
-Notebook envia comando MQTT
-        ↓
-Raspberry recebe comando
-        ↓
-LED vermelho + sirene
-        ↓
-Dashboard mostra EMERGÊNCIA
+Interface mostra EMERGÊNCIA
 ```
 
 Esse fluxo representa o principal objetivo técnico do CRTL-Lab: **integrar visão computacional, inteligência artificial, sistemas embarcados, sensores e software em uma solução única de segurança para laboratórios.**
