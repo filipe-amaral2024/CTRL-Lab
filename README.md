@@ -6,9 +6,9 @@ O **CRTL-Lab** é um sistema de controle de acesso e monitoramento de segurança
 
 A proposta combina **visão computacional, inteligência artificial, sensores ambientais e automação** para auxiliar na prevenção e identificação de situações de risco em um laboratório.
 
-O sistema utiliza duas câmeras — neste projeto, **smartphones funcionando como câmeras IP** — e um **Raspberry Pi 3B+** para integração com sensores e dispositivos de alerta.
+O sistema utiliza uma única câmera **PS3 Eye** conectada por USB ao **Raspberry Pi 3B+**. A câmera fornece frames compartilhados para dois modelos de visão: o modelo de segurança permanece ativo e o modelo de acesso pode ser ligado/desligado durante a execução.
 
-As câmeras IP são analisadas diretamente pelo Raspberry Pi. O computador não executa os modelos: fica responsável pela interface gráfica, pela visualização dos streams e pelo histórico de eventos recebido via MQTT.
+Os modelos são executados diretamente pelo Raspberry Pi. A captura não depende de stream IP de celular, evitando a latência e os travamentos observados. O computador recebe estado e eventos via MQTT; o dashboard web permite acompanhar sensores, riscos e histórico e controlar remotamente o modelo de acesso pela rede local.
 
 ---
 
@@ -23,7 +23,8 @@ Desenvolver um sistema capaz de verificar condições básicas de segurança no 
 - Detectar pessoas na entrada do laboratório.
 - Verificar o uso dos principais equipamentos de proteção individual (EPIs).
 - Identificar situações de EPI inadequado e gerar alertas.
-- Monitorar o ambiente do laboratório por meio de uma segunda câmera.
+- Monitorar fumaça e fogo continuamente pela PS3 Eye compartilhada.
+- Habilitar/desabilitar a análise de acesso sem interromper a checagem de segurança.
 - Detectar visualmente fumaça e possíveis sinais de incêndio.
 - Integrar sensores ambientais ao sistema.
 - Acionar LEDs, buzzer ou sirene em situações de alerta.
@@ -37,7 +38,7 @@ Desenvolver um sistema capaz de verificar condições básicas de segurança no 
 
 ### 3.1 Controle de acesso
 
-A primeira câmera ficará posicionada na região de entrada.
+A câmera única ficará posicionada de forma que o mesmo enquadramento possa ser usado pelos modelos de segurança e acesso.
 
 O sistema deverá:
 
@@ -60,20 +61,26 @@ Os itens inicialmente considerados são:
 
 ---
 
-### 3.2 Monitoramento do laboratório
+### 3.2 Segurança contínua
 
-A segunda câmera será direcionada para o interior do laboratório.
-
-Ela será utilizada para:
+O modelo de segurança deve permanecer ativo durante toda a execução visual e será utilizado para:
 
 - Identificação visual de fumaça.
 - Identificação visual de possíveis chamas/incêndios.
-- Monitoramento contínuo do ambiente.
 - Geração de eventos de alerta ou emergência.
+
+### 3.3 Modos de execução
+
+| Modelo | Estado inicial | Controle |
+|---|---|---|
+| Segurança (fumaça/fogo) | Sempre ativo | Não pode ser desligado pelo dashboard ou teclado |
+| Acesso (pessoa/EPI) | Desabilitado | Tecla `A` no terminal ou comando MQTT do dashboard |
+
+Ao desabilitar o modelo de acesso, a câmera e o modelo de segurança continuam funcionando.
 
 ---
 
-### 3.3 Sensores ambientais
+### 3.4 Sensores ambientais
 
 O Raspberry Pi 3B+ poderá receber dados de sensores como:
 
@@ -88,7 +95,7 @@ Uma câmera, por exemplo, não consegue detectar diretamente um gás invisível.
 
 ---
 
-### 3.4 Sistema de alertas
+### 3.5 Sistema de alertas
 
 Quando uma situação inadequada for detectada, o sistema poderá:
 
@@ -104,27 +111,29 @@ Quando uma situação inadequada for detectada, o sistema poderá:
 ## 4. Arquitetura do sistema
 
 ```text
-Smartphones ── stream IP ──► Raspberry Pi 3B+
-                                  │ OpenCV DNN + YOLO ONNX
-                                  │ Decisão + sensores + alarmes
-                                  │
-                                  └── MQTT ──► Computador (interface + SQLite)
-       └──────── stream IP ─────────────────► Computador (visualização)
+PS3 Eye USB ──► Raspberry Pi 3B+
+                    │ Um frame compartilhado
+                    ├── Modelo segurança (sempre ativo)
+                    ├── Modelo acesso (alternável)
+                    ├── Sensores + alarmes
+                    └── MQTT ──► Computador (dashboard web + SQLite)
 ```
 
 ### Divisão das responsabilidades
 
-**Smartphones**
-- Captura de vídeo.
-- Transmissão das imagens pela rede.
+**PS3 Eye**
+- Captura local de vídeo por USB.
+- Um único frame por ciclo compartilhado pelos dois modelos.
 
 **Notebook/Computador**
-- Interface gráfica e visualização dos streams IP.
+- Dashboard web acessível pelo navegador via IP na rede local.
+- Pode alternar o modelo de acesso via MQTT, com token de controle.
 - Recepção de status e eventos via MQTT.
 - Histórico local de eventos em SQLite.
 
 **Raspberry Pi 3B+**
-- Captura dos streams IP e execução dos modelos de IA em CPU.
+- Captura da PS3 Eye e execução dos modelos ONNX em CPU.
+- Mantém segurança contínua mesmo quando a análise de acesso está desabilitada.
 - Análise de EPIs e detecção visual de fumaça/incêndio.
 - Leitura dos sensores.
 - Controle de LEDs.
@@ -149,7 +158,7 @@ Smartphones ── stream IP ──► Raspberry Pi 3B+
 ### Hardware
 
 - Raspberry Pi 3B+
-- Dois smartphones
+- Uma câmera PS3 Eye USB
 - Sensores ambientais
 - LEDs
 - Resistores
@@ -162,18 +171,18 @@ Smartphones ── stream IP ──► Raspberry Pi 3B+
 
 ## 6. Inteligência artificial
 
-O projeto não pretende desenvolver uma rede neural do zero. O Raspberry executa um modelo YOLOv8 ONNX pequeno pelo OpenCV DNN, em CPU, com resolução e intervalo de inferência configuráveis.
+O projeto não pretende desenvolver uma rede neural do zero. O Raspberry executa dois modelos YOLOv8 ONNX pequenos pelo OpenCV DNN, em CPU, sobre o mesmo frame da PS3 Eye. O modelo de segurança roda continuamente; o modelo de acesso é opcional e inicia desabilitado. Seu ONNX só é carregado quando habilitado e liberado da memória ao desativá-lo.
 
 Serão utilizadas bibliotecas e modelos existentes, principalmente:
 
 - **OpenCV DNN** para inferência local com o modelo YOLOv8 ONNX.
 - **Ultralytics**, opcional na máquina de desenvolvimento, para exportar modelos treinados.
 
-Inicialmente poderão ser utilizados modelos pré-treinados para validar a infraestrutura.
+Os modelos são arquivos ONNX separados, com lista de classes própria: `smoke,fire` para segurança e `person,lab_coat,safety_glasses,closed_shoes,tied_hair` para acesso/EPI.
 
-Posteriormente, o modelo poderá ser ajustado com um conjunto de dados próprio para reconhecer os elementos específicos do projeto.
+O modelo de acesso pode ser ligado/desligado durante a execução pelo atalho `A` no terminal ou pelo dashboard via MQTT. Esse controle nunca desativa a checagem de segurança.
 
-### Possíveis classes do modelo de EPI
+### Possíveis classes do modelo de acesso/EPI
 
 ```text
 person
@@ -183,7 +192,7 @@ closed_shoes
 tied_hair
 ```
 
-### Possíveis classes do modelo de emergência
+### Possíveis classes do modelo contínuo de segurança
 
 ```text
 fire
@@ -281,8 +290,7 @@ CRTL-Lab/
 │   ├── config.py
 │   │
 │   ├── cameras/
-│   │   ├── entry_camera.py
-│   │   └── lab_camera.py
+│   │   └── entry_camera.py
 │   │
 │   ├── vision/
 │   │   ├── person.py
@@ -345,7 +353,7 @@ raspberry/
 
 Ao final do projeto, espera-se obter um protótipo funcional capaz de:
 
-1. Receber imagens de duas câmeras.
+1. Receber imagens de uma câmera PS3 Eye.
 2. Detectar pessoas e elementos de segurança.
 3. Avaliar o uso de EPIs.
 4. Detectar visualmente fumaça/incêndio.
@@ -387,9 +395,25 @@ python3 raspberry_pi/main.py --mock --cycles 2
 
 Esse comando valida a lógica do sistema e permite verificar a transição entre estados sem necessidade do Raspberry Pi real.
 
+### Executar o dashboard web
+
+Execute o dashboard no computador conectado à rede do Raspberry Pi e ao broker MQTT. Configure um token para proteger os comandos remotos:
+
+```powershell
+pip install -r requirements.txt
+$env:CTRL_LAB_DASHBOARD_TOKEN = "troque-por-um-token-com-16-caracteres-ou-mais"
+python -m central.dashboard --host 0.0.0.0 --port 8000 --broker <IP_DO_RASPBERRY>
+```
+
+Descubra o IP do computador que está hospedando o dashboard e acesse `http://<IP_DO_COMPUTADOR>:8000` em um navegador da mesma rede. Digite na página o mesmo token configurado no servidor. O serviço central também registra eventos em `ctrlab_events.db`; use `--db` para alterar o arquivo.
+
+O dashboard atualiza os dados periodicamente pelo MQTT e mostra o estado do sistema, leituras ambientais, os dois modelos, os eventos recentes e a pré-visualização ao vivo da PS3 Eye. O vídeo é capturado uma única vez no Raspberry e entregue como MJPEG de baixa taxa; o dashboard faz o proxy do stream para o navegador. O botão de acesso só envia o comando; a confirmação visual depende do próximo status publicado pelo Raspberry Pi.
+
+Use apenas em uma rede confiável: o HTTP local não é criptografado, portanto não exponha a porta do dashboard nem o broker diretamente à Internet.
+
 ### Execução da visão no Raspberry Pi
 
-O Pi deve alcançar os streams dos smartphones pela rede. Configure um broker MQTT no Pi (por exemplo, Mosquitto), mantenha as URLs IP das câmeras acessíveis e copie o modelo ONNX para o Raspberry.
+Conecte a PS3 Eye ao Raspberry Pi e confirme o índice de dispositivo (padrão `0`). Configure um broker MQTT no Pi (por exemplo, Mosquitto) e copie os modelos ONNX para o Raspberry.
 
 Instale as dependências Python em um ambiente virtual no Raspberry:
 
@@ -399,35 +423,46 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Exemplo de execução no Pi com as duas câmeras:
+Use o mesmo segredo de pelo menos 16 caracteres no Raspberry e no computador do dashboard para proteger o stream. Exemplo de execução no Pi com os dois modelos. O modelo de acesso começa desabilitado; pressione `A` no terminal para alterná-lo.
 
 ```bash
+export CTRL_LAB_CAMERA_TOKEN="use-o-mesmo-token-configurado-no-dashboard"
 python3 -m raspberry_pi.main \
   --broker localhost \
-  --entry-camera http://192.168.0.10:8080/video \
-  --lab-camera http://192.168.0.11:8080/video \
-  --ai-model models/ctrlab-yolov8n.onnx \
-  --ai-classes person,lab_coat,safety_glasses,closed_shoes,tied_hair,smoke,fire \
+  --camera-device 0 \
+  --safety-model models/ctrlab-safety.onnx \
+  --access-model models/ctrlab-access.onnx \
+  --safety-classes smoke,fire \
+  --access-classes person,lab_coat,safety_glasses,closed_shoes,tied_hair \
   --image-size 320 \
   --inference-interval 3
 ```
 
-O modelo deve ser YOLOv8 em ONNX com saída sem NMS no formato `[1, 4 + número_de_classes, candidatos]`. Os nomes e a ordem de `--ai-classes` precisam corresponder exatamente às classes usadas no treinamento. Um modelo COCO genérico não reconhece automaticamente jaleco, óculos, calçados, cabelo preso, fumaça ou fogo: use um modelo treinado para essas classes. Para exportar, em uma máquina de desenvolvimento com Ultralytics instalado:
+O serviço pode ser executado apenas com segurança, omitindo `--access-model`. Para controle do dashboard, use `CentralMQTTListener.set_access_model_enabled(True)` (ou publique o payload diretamente no tópico `ctrlab/central/commands`):
+
+```json
+{"command":"set_access_model","enabled":true}
+```
+
+Use `enabled: false` para desabilitar o modelo de acesso. O serviço publica `vision.access.enabled` junto aos resultados no tópico `ctrlab/raspberry/status`. O modelo de segurança não possui comando de desligamento.
+
+Cada modelo deve ser YOLOv8 em ONNX com saída sem NMS no formato `[1, 4 + número_de_classes, candidatos]`. Os nomes e a ordem de cada argumento `--*-classes` precisam corresponder exatamente às classes usadas no treinamento. Um modelo COCO genérico não reconhece automaticamente jaleco, óculos, calçados, cabelo preso, fumaça ou fogo: use modelos treinados para essas classes. Para exportar, em uma máquina de desenvolvimento com Ultralytics instalado:
 
 ```bash
 yolo export model=best.pt format=onnx imgsz=320
 ```
 
-O Pi não precisa instalar PyTorch ou Ultralytics para executar o modelo. Estados e detecções são publicados no tópico `ctrlab/raspberry/status`; o computador pode consumi-los para a interface e o histórico sem executar inferência. A interface gráfica em si continua sendo uma etapa pendente.
+O Pi não precisa instalar PyTorch ou Ultralytics para executar o modelo. Estados e detecções são publicados no tópico `ctrlab/raspberry/status`; o dashboard os consome para apresentar a telemetria e o histórico sem executar inferência.
+
+Com `CTRL_LAB_CAMERA_TOKEN` configurado, o Raspberry disponibiliza o stream MJPEG protegido em `http://<IP_DO_RASPBERRY>:8081/video.mjpg`. O dashboard usa por padrão o host informado em `--broker` para conectar ao stream; ajuste com `--camera-stream-url` se o endereço da câmera for diferente. Libere a porta TCP `8081` entre o computador do dashboard e o Raspberry. Sem o token, a pré-visualização não é iniciada.
 
 ---
 
-## 13. Fase 1 — Testar a primeira câmera IP
+## 13. Captura da câmera
 
-A primeira implementação de aquisição de vídeo foi criada em [app/cameras/entry_camera.py](app/cameras/entry_camera.py), com suporte a:
+O projeto usa uma única câmera USB PS3 Eye, adquirida com OpenCV por [app/cameras/entry_camera.py](app/cameras/entry_camera.py). A abstração genérica também aceita outras fontes, mas o runtime do Raspberry configura apenas um dispositivo local USB:
 
-- stream IP do smartphone em HTTP/RTSP;
-- câmera local do computador;
+- índice de dispositivo local (padrão `0`);
 - configuração inicial de largura, altura e FPS;
 - leitura de frames com OpenCV.
 
@@ -438,12 +473,11 @@ from app.cameras.entry_camera import CameraConfig, StreamCamera
 
 camera = StreamCamera(
     CameraConfig(
-        name="entry",
-        url="http://192.168.0.10:8080/video",
-        width=1280,
-        height=720,
-        fps=30,
-    )
+        name="ps3_eye",
+        width=640,
+        height=480,
+    ),
+    fallback_device=0,
 )
 
 camera.open()
@@ -452,4 +486,4 @@ print(frame is not None)
 camera.close()
 ```
 
-Esse módulo pode ser usado pela interface gráfica para exibir diretamente o stream do smartphone. A mesma URL é consumida pelo Raspberry para inferência; o computador não processa os frames.
+O Raspberry captura um frame por ciclo e o fornece aos dois modelos. A interface futura recebe estados e eventos via MQTT; ela não abre uma segunda fonte de câmera nem executa inferência.

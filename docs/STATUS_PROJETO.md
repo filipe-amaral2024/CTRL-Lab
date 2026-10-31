@@ -8,17 +8,18 @@ Em desenvolvimento ativo.
 
 - Raspberry Pi: sensores/alertas e inferência local OpenCV DNN para YOLOv8 ONNX implementados
 - Sistema central: persistência e eventos iniciais implementados
-- Câmeras: estrutura para entrada e laboratório pronta
-- Visão computacional: detector ONNX, avaliação de EPI e risco de fumaça/fogo integrados ao runtime do Raspberry
+- Câmera: runtime preparado para uma única PS3 Eye USB compartilhada pelos modelos
+- Visão computacional: segurança executa continuamente; acesso/EPI pode ser alternado por atalho `A` ou por comando MQTT
+- Dashboard: painel web acessível por IP, com estado, sensores, eventos, controle remoto e pré-visualização da câmera protegida por token
 - Testes: automatizados cobrindo módulos principais
 
-O runtime está pronto para receber um modelo ONNX treinado/exportado com as classes esperadas. O modelo e a interface gráfica ainda não estão incluídos no repositório; sem pesos compatíveis, não há inferência visual funcional.
+O runtime está pronto para receber dois modelos ONNX treinados/exportados com classes separadas (segurança e acesso). Os pesos ainda não estão incluídos; sem pesos compatíveis, não há inferência visual funcional. O dashboard já está implementado; sua validação com broker e Raspberry reais permanece pendente.
 
 ## Fases concluídas
 
 - Fase 0: organização inicial do projeto
-- Fase 1: primeira câmera de entrada
-- Fase 2: suporte à segunda câmera e múltiplos streams
+- Fase 1: captura local de câmera preparada
+- Fase 2: frame compartilhado e dois estados de execução dos modelos implementados
 - Fase 3: inferência YOLOv8 ONNX no Raspberry com OpenCV DNN
 - Integração de decisões visuais com sensores, atuadores e status MQTT
 
@@ -26,8 +27,9 @@ O runtime está pronto para receber um modelo ONNX treinado/exportado com as cla
 
 - Modelo ONNX próprio para classes de EPI, fumaça e fogo
 - Comunicação e instalação de broker MQTT no Raspberry
-- Interface gráfica e conexão com os streams IP
-- Testes com Raspberry e câmeras reais
+- Validação do dashboard e dos comandos com broker e Raspberry reais
+- Testes físicos da PS3 Eye e medição de desempenho no Raspberry
+- Testes com Raspberry e câmera real
 - Testes finais e apresentação
 
 ## Observação

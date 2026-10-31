@@ -55,12 +55,29 @@ class EventStoreTests(unittest.TestCase):
         event = SystemEvent.from_payload(
             {
                 "state": "ALERT",
-                "vision": {"entry": {"status": "ALERTA"}},
+                "vision": {"access": {"status": "ALERTA"}},
             }
         )
 
         self.assertEqual(event.event_type, "EPI")
         self.assertEqual(event.description, "EPI inadequado detectado na entrada")
+
+    def test_safety_and_access_models_use_shared_camera_event_keys(self):
+        safety_event = SystemEvent.from_payload(
+            {
+                "state": "EMERGENCY",
+                "vision": {"safety": {"risk": "EMERGENCY"}},
+            }
+        )
+        access_event = SystemEvent.from_payload(
+            {
+                "state": "ALERT",
+                "vision": {"access": {"status": "ALERTA"}},
+            }
+        )
+
+        self.assertEqual(safety_event.event_type, "VISION")
+        self.assertEqual(access_event.event_type, "EPI")
 
 
 if __name__ == "__main__":

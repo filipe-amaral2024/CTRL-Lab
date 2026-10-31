@@ -12,13 +12,13 @@ CTRL-Lab/
 │   ├── __init__.py
 │   └── cameras/
 │       ├── __init__.py
-│       ├── entry_camera.py
-│       ├── lab_camera.py
-│       └── multi_stream.py
+│       └── entry_camera.py
 │
 ├── central/
 │   ├── __init__.py
 │   ├── events.py
+│   ├── dashboard.py
+│   ├── dashboard.html
 │   └── mqtt_listener.py
 │
 ├── raspberry_pi/
@@ -27,14 +27,18 @@ CTRL-Lab/
 │   ├── config.py
 │   ├── hardware.py
 │   ├── main.py
+│   ├── camera_stream.py
+│   ├── keyboard.py
 │   ├── mqtt_client.py
 │   ├── sensors.py
 │   └── vision.py
 │
 ├── tests/
 │   ├── test_central_events.py
+│   ├── test_central_mqtt.py
+│   ├── test_camera_stream.py
+│   ├── test_dashboard.py
 │   ├── test_entry_camera.py
-│   ├── test_lab_camera.py
 │   ├── test_raspberry_core.py
 │   ├── test_raspberry_vision.py
 │   ├── test_yolo_base.py
@@ -64,7 +68,8 @@ O Raspberry concentra a execução e as decisões de visão, além das tarefas e
 - compatibilidade com modo mock para execução sem Raspberry real;
 - comunicação base para MQTT;
 - inferência CPU com OpenCV DNN e YOLOv8 ONNX, sem PyTorch no Pi;
-- captura das câmeras IP em thread separada para não atrasar o loop de sensores;
+- captura de uma câmera USB compartilhada em thread separada para não atrasar o loop de sensores;
+- controle em execução do modelo de acesso por MQTT e pelo atalho `A` no terminal;
 - publicação dos resultados visuais junto ao status MQTT;
 - acionamento local de ALERTA/EMERGÊNCIA por EPI inadequado ou fogo/fumaça.
 
@@ -75,7 +80,9 @@ Arquivos principais:
 - [raspberry_pi/alerts.py](../raspberry_pi/alerts.py)
 - [raspberry_pi/hardware.py](../raspberry_pi/hardware.py)
 - [raspberry_pi/main.py](../raspberry_pi/main.py)
+- [raspberry_pi/keyboard.py](../raspberry_pi/keyboard.py)
 - [raspberry_pi/mqtt_client.py](../raspberry_pi/mqtt_client.py)
+- [raspberry_pi/vision.py](../raspberry_pi/vision.py)
 
 ### 2.2 Sistema central
 
@@ -85,10 +92,15 @@ Foi iniciada a base da aplicação central para receber os dados do Raspberry e 
 - criação de eventos a partir do payload recebido;
 - classificação dos eventos por tipo e estado;
 - listener MQTT pronto para receber as mensagens do Raspberry.
+- método para comandar o estado do modelo de acesso pelo tópico central.
+- dashboard web com estado MQTT, sensores, eventos recentes e comando remoto protegido por token.
+- pré-visualização MJPEG protegida da câmera no dashboard, sem abrir uma segunda captura.
 
 Arquivos principais:
 
 - [central/events.py](../central/events.py)
+- [central/dashboard.py](../central/dashboard.py)
+- [central/dashboard.html](../central/dashboard.html)
 - [central/mqtt_listener.py](../central/mqtt_listener.py)
 - [central/__init__.py](../central/__init__.py)
 
@@ -96,16 +108,14 @@ Arquivos principais:
 
 Foi criada a infraestrutura para aquisição de vídeo das câmeras:
 
-- câmera de entrada do laboratório;
-- câmera de monitoramento do ambiente interno;
-- estrutura para múltiplos streams em paralelo;
-- suporte a stream IP e câmera local.
+- uma única captura local da PS3 Eye;
+- compartilhamento do mesmo frame entre o modelo contínuo de segurança e o modelo de acesso alternável;
+- o runtime não abre duas câmeras nem depende de stream IP de celular.
+- servidor MJPEG transmite frames recentes capturados pelo mesmo ciclo da câmera.
 
 Arquivos principais:
 
 - [app/cameras/entry_camera.py](../app/cameras/entry_camera.py)
-- [app/cameras/lab_camera.py](../app/cameras/lab_camera.py)
-- [app/cameras/multi_stream.py](../app/cameras/multi_stream.py)
 
 ### 2.4 Visão computacional
 
@@ -113,7 +123,10 @@ O projeto agora conta com duas opções de detector:
 
 - wrapper existente de Ultralytics, útil na máquina de desenvolvimento;
 - OpenCV DNN para inferência de YOLOv8 ONNX em CPU no Raspberry;
-- avaliadores de EPI e fumaça/fogo conectados ao serviço de câmeras.
+- modelo de segurança (fumaça/fogo) sempre executado;
+- modelo de acesso/EPI opcional, desabilitado por padrão, carregado sob demanda e liberado da memória ao desativar.
+
+O dashboard está disponível em `central/dashboard.py` e sua integração usa `CentralMQTTListener.set_access_model_enabled(enabled)`, que publica o comando no tópico MQTT `ctrlab/central/commands`. O controle recebe confirmação de estado em `vision.access.enabled` dentro do status publicado.
 
 O repositório não contém pesos. É necessário fornecer um ONNX YOLOv8 treinado para as classes `person`, `lab_coat`, `safety_glasses`, `closed_shoes`, `tied_hair`, `smoke` e `fire` (ou configurar a lista correspondente).
 
@@ -129,8 +142,9 @@ Arquivos principais:
 O projeto já conta com testes iniciais para os módulos principais:
 
 - teste do sistema central de eventos;
+- teste do stream MJPEG protegido e do proxy do dashboard;
 - teste da câmera de entrada;
-- teste da segunda câmera;
+- testes da câmera e do frame compartilhado pelos dois modelos;
 - teste do Raspberry em estados e payloads;
 - teste da base do detector YOLO;
 - teste de decodificação ONNX e execução CPU;
@@ -139,8 +153,9 @@ O projeto já conta com testes iniciais para os módulos principais:
 Arquivos de teste:
 
 - [tests/test_central_events.py](../tests/test_central_events.py)
+- [tests/test_central_mqtt.py](../tests/test_central_mqtt.py)
+- [tests/test_dashboard.py](../tests/test_dashboard.py)
 - [tests/test_entry_camera.py](../tests/test_entry_camera.py)
-- [tests/test_lab_camera.py](../tests/test_lab_camera.py)
 - [tests/test_raspberry_core.py](../tests/test_raspberry_core.py)
 - [tests/test_raspberry_vision.py](../tests/test_raspberry_vision.py)
 - [tests/test_yolo_base.py](../tests/test_yolo_base.py)
@@ -148,10 +163,11 @@ Arquivos de teste:
 
 ## 4. Próximos passos sugeridos
 
-1. Treinar/exportar e validar os pesos ONNX para as classes específicas.
-2. Instalar e configurar um broker MQTT no Raspberry e validar a rede real.
-3. Preparar a interface gráfica no computador para vídeo, telemetria e eventos.
-4. Medir FPS/CPU/RAM no Raspberry utilizado e ajustar intervalo/resolução.
+1. Treinar/exportar e validar os dois pesos ONNX para as classes específicas.
+2. Instalar e configurar um broker MQTT no Raspberry e validar os comandos reais.
+3. Validar o dashboard e comandos em uma rede com Raspberry e broker reais.
+4. Medir FPS/CPU/RAM e estabilidade com a PS3 Eye e ambos os modelos no Raspberry.
+5. Validar o stream MJPEG e a taxa de quadros com a PS3 Eye no Raspberry real.
 
 ## 5. Observação
 

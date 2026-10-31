@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List
@@ -16,6 +17,12 @@ class SystemEvent:
     def from_payload(cls, payload: Dict[str, Any]):
         state = str(payload.get("state", "NORMAL")).upper()
         details = dict(payload)
+        vision = payload.get("vision")
+        safety_result = None
+        access_result = None
+        if isinstance(vision, dict):
+            safety_result = vision.get("safety", vision.get("lab"))
+            access_result = vision.get("access", vision.get("entry"))
 
         if payload.get("smoke_detected") is True:
             event_type = "SENSOR"
@@ -23,18 +30,10 @@ class SystemEvent:
         elif float(payload.get("gas_ppm", 0.0) or 0.0) >= 0.7:
             event_type = "SENSOR"
             description = "Gás em nível crítico"
-        elif (
-            isinstance(payload.get("vision"), dict)
-            and isinstance(payload["vision"].get("lab"), dict)
-            and payload["vision"]["lab"].get("risk") == "EMERGENCY"
-        ):
+        elif isinstance(safety_result, dict) and safety_result.get("risk") == "EMERGENCY":
             event_type = "VISION"
             description = "Fumaça ou incêndio detectado pela câmera"
-        elif (
-            isinstance(payload.get("vision"), dict)
-            and isinstance(payload["vision"].get("entry"), dict)
-            and payload["vision"]["entry"].get("status") == "ALERTA"
-        ):
+        elif isinstance(access_result, dict) and access_result.get("status") == "ALERTA":
             event_type = "EPI"
             description = "EPI inadequado detectado na entrada"
         elif state in {"ALERT", "WARNING", "EMERGENCY"}:
@@ -60,7 +59,7 @@ class EventStore:
         self._ensure_schema()
 
     def _ensure_schema(self):
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS events (
@@ -85,7 +84,7 @@ class EventStore:
         payload = details or {}
         now = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn:
             cursor = conn.execute(
                 """
                 INSERT INTO events (created_at, event_type, description, state, details)
@@ -97,7 +96,7 @@ class EventStore:
             return int(cursor.lastrowid)
 
     def get_recent_events(self, limit: int = 20) -> List[Dict[str, Any]]:
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn:
             rows = conn.execute(
                 """
                 SELECT id, created_at, event_type, description, state, details

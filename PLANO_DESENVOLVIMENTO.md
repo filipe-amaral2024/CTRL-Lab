@@ -9,15 +9,15 @@ A estratégia é evitar tentar desenvolver todos os componentes simultaneamente.
 A ordem recomendada é:
 
 ```text
-Câmera
+Uma câmera USB PS3 Eye
   ↓
-OpenCV
+Captura única de frames
   ↓
-Detecção com IA
+Modelo contínuo de segurança + modelo de acesso controlável
   ↓
-Lógica de segurança
+Decisão de segurança independente do dashboard
   ↓
-Comunicação
+MQTT + atalho local de teclado
   ↓
 Raspberry Pi
   ↓
@@ -58,78 +58,63 @@ Projeto inicial organizado e pronto para receber os módulos.
 
 ---
 
-# 3. Fase 1 — Testar a primeira câmera
+# 3. Fase 1 — Integrar a PS3 Eye
 
 ## Objetivo
 
-Fazer um smartphone transmitir vídeo para a rede e permitir que o Raspberry Pi e a interface gráfica acessem o stream.
+Capturar vídeo de uma única câmera USB PS3 Eye ligada ao Raspberry Pi. Essa câmera será compartilhada pelos dois modelos; não será usado stream IP de celular devido à latência e aos travamentos relatados.
 
 ## Fluxo
 
 ```text
-Smartphone
+PS3 Eye (USB)
     ↓
-Rede Wi-Fi
-    ├── Raspberry Pi → OpenCV DNN e inferência
-    └── Computador → visualização na interface
+Raspberry Pi → OpenCV → frame compartilhado
+                       ├── modelo de segurança (sempre ativo)
+                       └── modelo de acesso (ativável/desativável)
 ```
 
 ## Tarefas
 
-- [ ] Escolher aplicativo para transformar o smartphone em câmera IP.
-- [ ] Conectar os smartphones, o Raspberry e o computador à mesma rede.
-- [ ] Obter URL do stream.
+- [ ] Conectar a PS3 Eye ao Raspberry Pi e confirmar o índice do dispositivo.
 - [ ] Abrir o stream usando OpenCV.
-- [ ] Exibir o vídeo.
-- [ ] Testar estabilidade da transmissão.
-- [ ] Medir aproximadamente a latência.
+- [ ] Testar captura contínua e estabilidade no hardware real.
+- [ ] Medir latência, FPS e uso de CPU/RAM.
 
 ## Critério de conclusão
 
-O Raspberry deve conseguir capturar frames para inferência e o computador deve conseguir exibir o stream na interface.
+O Raspberry deve ler frames da PS3 Eye sem rede ou smartphone no caminho de vídeo.
 
 Este é o primeiro marco importante do projeto.
 
 ---
 
-# 4. Fase 2 — Adicionar a segunda câmera
+# 4. Fase 2 — Compartilhar a câmera entre dois modelos
 
 ## Objetivo
 
-Permitir que o sistema receba simultaneamente as duas câmeras.
+Executar dois modelos de IA sobre o mesmo frame capturado, evitando abrir duas câmeras ou capturar o vídeo duas vezes.
 
-## Câmera 1
+## Estados de execução
 
-Responsável pelo:
+| Modelo | Estado esperado | Responsabilidade |
+|---|---|---|
+| Segurança | Sempre habilitado enquanto a visão estiver em execução | Detectar fumaça e fogo; manter geração de emergência ativa |
+| Acesso | Desabilitado por padrão; carregado sob demanda e habilitável/desabilitável durante a execução | Detectar pessoa e avaliar EPIs para o acesso ao laboratório |
 
-```text
-Controle de acesso
-+
-Verificação de EPI
-```
-
-## Câmera 2
-
-Responsável pelo:
-
-```text
-Monitoramento ambiental
-+
-Fumaça/incêndio
-```
+O atalho `A` no terminal alterna o modelo de acesso. O dashboard envia a mesma solicitação pelo tópico MQTT `ctrlab/central/commands` (API `CentralMQTTListener.set_access_model_enabled`); nenhuma ação do dashboard pode parar o modelo de segurança.
 
 ## Tarefas
 
-- [ ] Configurar segundo smartphone.
-- [ ] Criar `entry_camera.py`.
-- [ ] Criar `lab_camera.py`.
-- [ ] Testar os dois streams simultaneamente.
-- [ ] Verificar consumo de CPU/RAM.
-- [ ] Definir resolução adequada.
+- [x] Capturar um único frame e compartilhar entre detectores de segurança e acesso.
+- [x] Manter a inferência de segurança contínua.
+- [x] Permitir habilitar/desabilitar a inferência de acesso em execução.
+- [x] Reservar comandos MQTT e atalho de teclado para controlar o modelo de acesso.
+- [ ] Confirmar sincronização, desempenho e estabilidade na PS3 Eye real.
 
 ## Critério de conclusão
 
-As duas câmeras devem funcionar no Raspberry, com inferência limitada por intervalo e resolução para respeitar os recursos do Pi.
+Cada ciclo deve capturar um frame da PS3 Eye e executar sempre o modelo de segurança. O ONNX de acesso deve ser carregado e executado somente enquanto habilitado, e removido da memória ao desativá-lo.
 
 ---
 
@@ -142,22 +127,19 @@ Validar a inteligência artificial no Raspberry antes de criar o modelo personal
 ## Fluxo
 
 ```text
-Smartphone / stream IP
+PS3 Eye (uma captura)
   ↓
-OpenCV
-  ↓
-YOLOv8 ONNX pelo OpenCV DNN (CPU no Raspberry)
-  ↓
-Pessoa detectada
+Frame compartilhado
+  ├── YOLO segurança (ONNX/OpenCV DNN, CPU)
+  └── YOLO acesso (ONNX/OpenCV DNN, CPU, sob demanda)
 ```
 
 ## Tarefas
 
-- [ ] Exportar um modelo YOLOv8 pequeno para ONNX em uma máquina de desenvolvimento.
-- [ ] Copiar o ONNX para o Raspberry.
-- [ ] Executar inferência no Raspberry com OpenCV DNN.
-- [ ] Detectar pessoas.
-- [ ] Exibir bounding boxes.
+- [ ] Exportar modelos YOLOv8 ONNX separados para segurança (`smoke`, `fire`) e acesso (`person` e classes de EPI).
+- [ ] Copiar os modelos ONNX para o Raspberry.
+- [x] Executar inferência de segurança em todos os ciclos.
+- [x] Executar inferência de acesso apenas quando habilitada.
 - [ ] Medir FPS.
 - [ ] Medir uso de CPU/RAM no Raspberry.
 
@@ -283,12 +265,12 @@ Resultado:
 
 ## Objetivo
 
-Criar o módulo responsável pela segunda câmera.
+Criar/validar o modelo contínuo de segurança, que usa a PS3 Eye compartilhada.
 
 ## Fluxo
 
 ```text
-Câmera 2
+PS3 Eye (frame compartilhado)
    ↓
 YOLO / modelo de visão
    ↓
@@ -380,6 +362,14 @@ ctrlab/central/commands
 ```
 
 O broker MQTT pode rodar no Raspberry. O computador recebe eventos e status; as decisões de visão e os alertas físicos não dependem dele.
+
+Comando para o atalho do dashboard controlar somente a análise de acesso:
+
+```json
+{"command":"set_access_model","enabled":true}
+```
+
+Enviar `enabled: false` desativa a análise de acesso. O modelo de segurança não possui comando de desligamento. O Raspberry publica o estado efetivo em `vision.access.enabled` no tópico de status.
 
 ## Exemplo de fluxo
 
@@ -541,7 +531,7 @@ estado
 
 ## Objetivo
 
-Criar no computador uma interface visual para apresentação e monitoramento. A interface não deve executar modelos nem lógica de inferência.
+Criar no computador uma interface web para apresentação e monitoramento, acessível pelo IP na rede local. A interface não executa modelos nem lógica de inferência; troca status e comandos com o Raspberry por MQTT.
 
 ## Elementos sugeridos
 
@@ -549,10 +539,8 @@ Criar no computador uma interface visual para apresentação e monitoramento. A 
 ┌─────────────────────────────────────────┐
 │             CRTL-Lab                     │
 ├──────────────────┬──────────────────────┤
-│ Câmera Entrada   │ Câmera Laboratório   │
-│                  │                      │
-│                  │                      │
-├──────────────────┼──────────────────────┤
+│ Estado do sistema + conexão MQTT        │
+├──────────────────┬──────────────────────┤
 │ EPI              │ Ambiente             │
 │ ✓ Jaleco         │ Temperatura: 25 °C   │
 │ ✓ Óculos         │ Gás: Normal          │
@@ -566,14 +554,15 @@ Criar no computador uma interface visual para apresentação e monitoramento. A 
 
 ## Tarefas
 
-- [ ] Criar servidor web.
-- [ ] Mostrar estado atual.
-- [ ] Mostrar câmeras.
-- [ ] Mostrar sensores.
-- [ ] Mostrar EPI.
-- [ ] Mostrar eventos.
-- [ ] Criar indicadores visuais.
-- [ ] Criar página de histórico.
+- [x] Criar servidor web HTTP acessível na rede local.
+- [x] Mostrar estado atual e conexão MQTT.
+- [x] Mostrar sensores ambientais e resultados dos modelos.
+- [x] Adicionar controle para habilitar/desabilitar o modelo de acesso via MQTT.
+- [x] Refletir no painel `vision.access.enabled` recebido no status.
+- [x] Mostrar eventos recentes do SQLite.
+- [x] Criar indicadores visuais responsivos.
+- [x] Adicionar pré-visualização MJPEG protegida da PS3 Eye no dashboard, compartilhando a captura da inferência.
+- [ ] Criar página de histórico paginada.
 
 ---
 
@@ -752,13 +741,11 @@ Nem todas as funcionalidades possuem a mesma prioridade.
 ## Prioridade 1 — Obrigatório
 
 ```text
-✓ Câmera 1
-✓ Câmera 2
+✓ Uma PS3 Eye compartilhada
 ✓ OpenCV
 ✓ YOLO
-✓ Detecção de pessoa
-✓ Verificação básica de EPI
-✓ Detecção de fumaça/fogo
+✓ Modelo de segurança sempre ativo
+✓ Modelo de acesso controlável
 ✓ Raspberry Pi
 ✓ Comunicação
 ✓ Alarme
@@ -769,8 +756,8 @@ Nem todas as funcionalidades possuem a mesma prioridade.
 ```text
 ✓ Sensores ambientais
 ✓ Banco de dados
-✓ Dashboard
-✓ Histórico
+✓ Dashboard web na rede local com controle do modelo de acesso
+✓ Eventos recentes integrados ao dashboard
 ✓ Modo demonstração
 ```
 
@@ -795,11 +782,11 @@ Se houver pouco tempo, as funcionalidades da prioridade 3 devem ser descartadas 
 A primeira versão funcional deve ser:
 
 ```text
-Smartphone
+PS3 Eye
     ↓
 Raspberry Pi (OpenCV DNN + YOLO ONNX)
-    ↓
-Análise de EPI / fogo / fumaça
+    ├── segurança (sempre ativa)
+    └── acesso/EPI (sob demanda)
     ↓
 Decisão e alarme locais
     ↓
@@ -809,7 +796,7 @@ MQTT → interface gráfica no computador
 Depois:
 
 ```text
-Smartphones → Raspberry Pi → IA + sensores → decisão/alarme locais
+PS3 Eye → Raspberry Pi → dois modelos + sensores → decisão/alarme locais
                     │
                     └── MQTT → computador (interface e histórico)
 ```
