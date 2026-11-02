@@ -55,16 +55,16 @@ Se a intenção for começar com um protótipo simples e funcional, a lista mín
 - 3 resistores 220 Ω
 - 1 buzzer
 - 1 DHT22
-- 1 sensor MQ-2
-- 1 botão de emergência
 - jumpers
 
 Essa configuração já permite validar:
 
-- monitoramento ambiental
+- monitoramento ambiental de temperatura e umidade
 - lógica de alertas
 - comunicação com o computador central
 - acionamento de indicadores visuais e sonoros
+
+MQ-2 e botões são opcionais na primeira montagem. O runtime oferece suporte ao MQ-2 por saída digital DO, botão de emergência e botão de reset; não lê saída analógica nem calcula concentração em ppm.
 
 ---
 
@@ -78,9 +78,11 @@ Essa configuração já permite validar:
 
 ### Etapa 2 — Montar LEDs indicativos
 
-- LED vermelho -> GPIO22 -> resistor 220 Ω -> GND
-- LED amarelo -> GPIO27 -> resistor 220 Ω -> GND
-- LED verde -> GPIO24 -> resistor 220 Ω -> GND
+- GPIO22 -> resistor 220 Ω -> ânodo do LED vermelho; cátodo -> GND
+- GPIO27 -> resistor 220 Ω -> ânodo do LED amarelo; cátodo -> GND
+- GPIO24 -> resistor 220 Ω -> ânodo do LED verde; cátodo -> GND
+
+Use os pinos GPIO em lógica de 3,3 V; não conecte 5 V a nenhum GPIO.
 
 Essa é a base visual do sistema para indicar:
 
@@ -90,32 +92,44 @@ Essa é a base visual do sistema para indicar:
 
 ### Etapa 3 — Montar buzzer
 
-- Buzzer -> GPIO23
-- Em alguns casos, usar transistor ou módulo driver para garantir melhor desempenho.
+- Acione o buzzer pelo GPIO23 somente se o módulo for compatível com nível lógico de 3,3 V e consumir dentro do limite permitido pelo GPIO.
+- Para buzzer/sirene que exija mais corrente, use transistor ou módulo driver apropriado; não alimente a carga diretamente pelo GPIO.
 
 ### Etapa 4 — Montar o DHT22
 
-- VCC -> alimentação adequada do sensor
+- VCC -> 3,3 V (confirme a especificação do sensor/módulo)
 - GND -> GND
 - DATA -> GPIO17
+- Olhando a grade do DHT22 de frente e os pinos para baixo: pino 1 -> VCC, pino 2 -> DATA, pino 3 -> sem conexão, pino 4 -> GND.
+- No DHT22 sem módulo, use resistor pull-up de aproximadamente 4,7 kΩ entre DATA e 3,3 V. Módulos prontos podem já incluir esse resistor.
 
 Esse sensor permite medir:
 
 - temperatura
 - umidade
 
+O runtime só usa leituras simuladas quando executado com `--mock`. No modo real, se a biblioteca ou o sensor não estiver disponível, os valores serão publicados como `null` e aparecerão como `—` no dashboard.
+
 ### Etapa 5 — Montar o sensor de gás
 
 - MQ-2 ou MQ-135 conforme disponibilidade
 - VCC -> 5V
 - GND -> GND
-- OUT -> entrada analógica ou digital conforme módulo
+- DO -> GPIO5 (BCM), usando adaptação de nível para garantir no máximo 3,3 V no GPIO
+
+Para um módulo cuja saída DO possa chegar a 5 V, use um divisor resistivo, por exemplo: DO -> resistor de 10 kΩ -> GPIO5; GPIO5 -> resistor de 20 kΩ -> GND. Una os GNDs do módulo e do Raspberry Pi. Um conversor de nível lógico apropriado também pode ser usado.
+
+**Não conecte OUT diretamente a um GPIO.** O Raspberry Pi não tem entrada analógica, e a saída digital de alguns módulos alimentados em 5 V também pode exceder os 3,3 V tolerados pelos GPIOs. A leitura analógica exige um ADC compatível e a leitura digital exige confirmar a tensão de saída e usar adaptação de nível quando necessário.
+
+O runtime usa somente a saída digital DO e a indica como `Detectado`/`Normal`; isso representa o limiar do comparador ajustado no módulo, não uma concentração em ppm. O padrão é saída ativa em LOW; use `--mq2-active-high` se o seu módulo indicar detecção em HIGH. Confirme no próprio módulo e meça a saída antes de conectar.
 
 ### Etapa 6 — Botão de emergência
 
-- Botão ligado com pull-up ou pull-down
-- Conectar a GPIO de entrada
-- Usado para simular parada de emergência ou reset manual
+- Botão normalmente aberto entre GPIO6 (BCM) e GND; o runtime configura pull-up interno.
+- Botão normalmente aberto de reset entre GPIO13 (BCM) e GND; o runtime configura pull-up interno.
+- O botão de emergência é do tipo trava: ao acioná-lo, o contato permanece ativo até destravar mecanicamente o próprio botão, conforme o modelo instalado.
+- Depois de destravar mecanicamente o botão de emergência, pressione o botão separado de reset. Ele só libera EMERGENCY quando o contato de emergência está inativo e não há condição crítica ativa nos sensores ou na visão.
+- Não conecte o botão a 3,3 V ou 5 V.
 
 ---
 
@@ -136,10 +150,10 @@ Raspberry Pi:
 - Modelo de segurança (fumaça/fogo) sempre ativo
 - Modelo de acesso/EPI somente quando habilitado
 - DHT22
-- MQ-2/MQ-135
+- MQ-2/MQ-135 pela saída digital DO (sem leitura em ppm)
 - LEDs
 - buzzer
-- botão de emergência
+- botão de emergência e botão de reset
 - status e eventos via MQTT
 ```
 
@@ -182,12 +196,12 @@ Libere a porta TCP 8000 no firewall do computador anfitrião para a rede local e
 1. Montar Raspberry com LEDs e buzzer.
 2. Validar GPIO e estado visual do sistema.
 3. Integrar DHT22 e testar temperatura/umidade.
-4. Integrar sensor de gás e validar leitura.
-5. Conectar botão de emergência.
-6. Validar comunicação MQTT.
-7. Conectar a PS3 Eye e validar a captura local.
-8. Copiar os dois modelos ONNX e validar a segurança contínua e a alternância do acesso.
-9. Configurar o broker, iniciar o dashboard web e conectar status/comandos MQTT.
+4. Validar comunicação MQTT.
+5. Conectar a PS3 Eye e validar a captura local.
+6. Copiar os modelos ONNX e validar a segurança contínua e, se houver modelo compatível, a alternância do acesso.
+7. Configurar o broker, iniciar o dashboard web e conectar status/comandos MQTT.
+8. Validar o limiar digital do MQ-2 e confirmar a tensão do DO com multímetro antes de conectar.
+9. Validar que o botão de emergência trava EMERGENCY e que o reset só funciona sem risco crítico ativo.
 
 ---
 

@@ -21,6 +21,10 @@ class RaspberryConfig:
     green_led_pin: int = 24
     buzzer_pin: int = 23
     siren_pin: int = 18
+    mq2_digital_pin: int = 5
+    emergency_button_pin: int = 6
+    reset_button_pin: int = 13
+    mq2_active_low: bool = True
 
     # Limites ambientais
     max_temperature_c: float = 30.0
@@ -39,4 +43,12 @@ class RaspberryConfig:
             "green": self.green_led_pin,
             "buzzer": self.buzzer_pin,
             "siren": self.siren_pin,
+        }
+
+    @property
+    def input_pins(self):
+        return {
+            "mq2": self.mq2_digital_pin,
+            "emergency_button": self.emergency_button_pin,
+            "reset_button": self.reset_button_pin,
         }

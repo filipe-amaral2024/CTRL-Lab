@@ -12,6 +12,9 @@ class GPIOController:
         self.use_mock = config.use_mock_hardware if use_mock is None else use_mock
         self.gpio = None
         self._initialized = False
+        self._emergency_button_pressed = False
+        self._reset_button_pressed = False
+        self._button_event_registered = False
 
         if self.use_mock:
             logger.info("GPIO em modo mock ativado.")
@@ -40,6 +43,57 @@ class GPIOController:
 
         for pin in self.config.pins.values():
             self.gpio.setup(pin, self.gpio.OUT, initial=self.gpio.LOW)
+        for pin in self.config.input_pins.values():
+            self.gpio.setup(
+                pin,
+                self.gpio.IN,
+                pull_up_down=self.gpio.PUD_UP,
+            )
+
+        self._emergency_button_pressed = self._button_is_pressed(
+            self.config.emergency_button_pin
+        )
+        self._reset_button_pressed = self._button_is_pressed(
+            self.config.reset_button_pin
+        )
+        for pin in (
+            self.config.emergency_button_pin,
+            self.config.reset_button_pin,
+        ):
+            self.gpio.add_event_detect(
+                pin,
+                self.gpio.BOTH,
+                callback=self._update_button,
+                bouncetime=200,
+            )
+        self._button_event_registered = True
+
+    def _button_is_pressed(self, pin):
+        return not bool(self.gpio.input(pin))
+
+    def _update_button(self, channel):
+        pressed = self._button_is_pressed(channel)
+        if channel == self.config.emergency_button_pin:
+            self._emergency_button_pressed = pressed
+        elif channel == self.config.reset_button_pin:
+            self._reset_button_pressed = pressed
+
+    def read_input(self, pin: int) -> Optional[bool]:
+        if self.use_mock or self.gpio is None:
+            return None
+        return bool(self.gpio.input(pin))
+
+    @property
+    def emergency_button_pressed(self) -> Optional[bool]:
+        if self.use_mock or self.gpio is None:
+            return None
+        return self._emergency_button_pressed
+
+    @property
+    def reset_button_pressed(self) -> Optional[bool]:
+        if self.use_mock or self.gpio is None:
+            return None
+        return self._reset_button_pressed
 
     def set_output(self, pin: int, value: bool):
         if self.use_mock:
@@ -66,6 +120,13 @@ class GPIOController:
             return
 
         try:
+            if self._button_event_registered:
+                for pin in (
+                    self.config.emergency_button_pin,
+                    self.config.reset_button_pin,
+                ):
+                    self.gpio.remove_event_detect(pin)
+                self._button_event_registered = False
             for pin in self.config.pins.values():
                 self.gpio.output(pin, self.gpio.LOW)
             self.gpio.cleanup()

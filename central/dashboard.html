@@ -140,8 +140,10 @@
         <div class="metrics">
           <div class="metric"><div class="metric-label">Temperatura</div><div id="temperature" class="metric-value">—</div></div>
           <div class="metric"><div class="metric-label">Umidade</div><div id="humidity" class="metric-value">—</div></div>
-          <div class="metric"><div class="metric-label">Gás</div><div id="gas" class="metric-value">—</div></div>
+          <div class="metric"><div class="metric-label">Gás / limiar</div><div id="gas" class="metric-value">—</div></div>
           <div class="metric"><div class="metric-label">Fumaça sensor</div><div id="smoke" class="metric-value">—</div></div>
+          <div class="metric"><div class="metric-label">Botão de emergência</div><div id="emergencyButton" class="metric-value">—</div></div>
+          <div class="metric"><div class="metric-label">Botão de reset</div><div id="resetButton" class="metric-value">—</div></div>
         </div>
       </article>
       <article class="card half-card">
@@ -248,8 +250,16 @@
         setText("systemMessage", state === "NORMAL" ? "Nenhum risco reportado." : "O sistema reportou uma condição que requer atenção.");
         setText("temperature", formatNumber(status.temperature_c, " °C"));
         setText("humidity", formatNumber(status.humidity_pct, " %"));
-        setText("gas", formatNumber(status.gas_ppm, " ppm"));
+        setText("gas", typeof status.gas_detected === "boolean"
+          ? status.gas_detected ? "Detectado" : "Normal"
+          : formatNumber(status.gas_ppm, " ppm"));
         setText("smoke", status.smoke_detected === true ? "Detectada" : status.smoke_detected === false ? "Normal" : "—");
+        setText("emergencyButton", status.emergency_button_pressed === true
+          ? "Pressionado"
+          : status.emergency_button_pressed === false ? "Normal" : "—");
+        setText("resetButton", status.reset_button_pressed === true
+          ? "Pressionado"
+          : status.reset_button_pressed === false ? "Normal" : "—");
 
         const vision = status.vision || {};
         const safety = vision.safety || vision.lab || {};

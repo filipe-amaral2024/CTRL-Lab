@@ -74,7 +74,11 @@ class DashboardServerTests(unittest.TestCase):
 
         with self.request("/") as response:
             self.assertEqual(response.status, 200)
-            self.assertIn(b"CTRL-Lab", response.read())
+            page = response.read()
+            self.assertIn(b"CTRL-Lab", page)
+            self.assertIn(b"emergencyButton", page)
+            self.assertIn(b"resetButton", page)
+            self.assertIn(b"G\xc3\xa1s / limiar", page)
 
         with self.request("/api/state") as response:
             payload = json.loads(response.read())

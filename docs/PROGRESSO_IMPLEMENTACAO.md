@@ -61,8 +61,12 @@ CTRL-Lab/
 
 O Raspberry concentra a execução e as decisões de visão, além das tarefas embarcadas:
 
-- leitura de temperatura e umidade;
-- leitura simulada de gás e fumaça;
+- leitura de temperatura e umidade por DHT22 opcional;
+- leitura digital do limiar DO do MQ-2 (sem cálculo de ppm);
+- botão de emergência com contato mecanicamente travado e botão separado de reset; emergência só limpa após destravar o botão e confirmar ausência de risco crítico;
+- teste de captura da PS3 Eye por CLI sem exigir modelos ONNX;
+- valores simulados de sensores somente quando executado com `--mock`;
+- publicação como indisponíveis dos sensores físicos que não estão conectados/implementados;
 - estados do sistema: NORMAL, WARNING, ALERT e EMERGENCY;
 - controle de LEDs, buzzer e sirene via abstração de hardware;
 - compatibilidade com modo mock para execução sem Raspberry real;
@@ -146,6 +150,7 @@ O projeto já conta com testes iniciais para os módulos principais:
 - teste da câmera de entrada;
 - testes da câmera e do frame compartilhado pelos dois modelos;
 - teste do Raspberry em estados e payloads;
+- testes de ausência de leituras físicas e de valores simulados;
 - teste da base do detector YOLO;
 - teste de decodificação ONNX e execução CPU;
 - teste do pipeline visual de EPI e fumaça/fogo.
@@ -157,6 +162,9 @@ Arquivos de teste:
 - [tests/test_dashboard.py](../tests/test_dashboard.py)
 - [tests/test_entry_camera.py](../tests/test_entry_camera.py)
 - [tests/test_raspberry_core.py](../tests/test_raspberry_core.py)
+- [tests/test_raspberry_camera_test.py](../tests/test_raspberry_camera_test.py)
+- [tests/test_raspberry_hardware.py](../tests/test_raspberry_hardware.py)
+- [tests/test_raspberry_sensors.py](../tests/test_raspberry_sensors.py)
 - [tests/test_raspberry_vision.py](../tests/test_raspberry_vision.py)
 - [tests/test_yolo_base.py](../tests/test_yolo_base.py)
 - [tests/test_yolo_onnx.py](../tests/test_yolo_onnx.py)
@@ -172,3 +180,5 @@ Arquivos de teste:
 ## 5. Observação
 
 A base do projeto está organizada para dar continuidade ao desenvolvimento em etapas, seguindo a ordem definida em [PLANO_DESENVOLVIMENTO.md](../PLANO_DESENVOLVIMENTO.md).
+
+No modo real, o DHT22 só fornece leituras se a biblioteca e o sensor estiverem disponíveis. O MQ-2 fornece somente o estado digital do comparador; não há medição em ppm. Confirme tensão e polaridade do pino DO do módulo. Os arquivos ONNX também não estão no repositório, então inferência com câmera real depende do fornecimento dos pesos.

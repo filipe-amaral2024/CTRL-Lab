@@ -62,6 +62,28 @@ class EventStoreTests(unittest.TestCase):
         self.assertEqual(event.event_type, "EPI")
         self.assertEqual(event.description, "EPI inadequado detectado na entrada")
 
+    def test_digital_gas_detection_has_specific_event_description(self):
+        event = SystemEvent.from_payload(
+            {
+                "state": "EMERGENCY",
+                "gas_detected": True,
+            }
+        )
+
+        self.assertEqual(event.event_type, "SENSOR")
+        self.assertEqual(event.description, "Gás acima do limiar configurado")
+
+    def test_emergency_button_has_specific_event_description(self):
+        event = SystemEvent.from_payload(
+            {
+                "state": "EMERGENCY",
+                "emergency_button_pressed": True,
+            }
+        )
+
+        self.assertEqual(event.event_type, "SAFETY")
+        self.assertEqual(event.description, "Botão de emergência pressionado")
+
     def test_safety_and_access_models_use_shared_camera_event_keys(self):
         safety_event = SystemEvent.from_payload(
             {

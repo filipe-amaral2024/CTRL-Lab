@@ -415,13 +415,57 @@ Use apenas em uma rede confiável: o HTTP local não é criptografado, portanto 
 
 Conecte a PS3 Eye ao Raspberry Pi e confirme o índice de dispositivo (padrão `0`). Configure um broker MQTT no Pi (por exemplo, Mosquitto) e copie os modelos ONNX para o Raspberry.
 
-Instale as dependências Python em um ambiente virtual no Raspberry:
+#### Preparar o Raspberry Pi OS Lite 64-bit
+
+Confirme que o sistema é 64-bit e registre a versão do Python antes de instalar dependências:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+uname -m
+python3 --version
+cat /etc/os-release
 ```
+
+Em uma instalação `aarch64`, instale as ferramentas de ambiente virtual e crie o ambiente no diretório do projeto:
+
+```bash
+sudo apt update
+sudo apt install -y python3-venv python3-pip python3-rpi.gpio mosquitto mosquitto-clients
+python3 -m venv --system-site-packages .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m pip install adafruit-circuitpython-dht
+```
+
+Instale também a biblioteca de sistema `libgpiod` correspondente à versão do Raspberry Pi OS (por exemplo, `libgpiod2` no Bookworm ou `libgpiod3` no Trixie), caso exigida pelo pacote do DHT22.
+
+O ambiente virtual usa pacotes do sistema para permitir o acesso à biblioteca GPIO instalada pelo Raspberry Pi OS. O controle físico requer uma implementação compatível com `RPi.GPIO` para o modelo do Raspberry Pi e a versão do sistema. No modo real, se a biblioteca não estiver disponível, o programa registra um aviso e usa saídas simuladas; confirme a inicialização do GPIO antes de conectar LEDs ou buzzer.
+
+O `adafruit-circuitpython-dht` habilita o DHT22 avulso; instale a versão de `libgpiod` compatível com a versão do sistema quando exigida pelo driver. Olhando a grade do DHT22 de frente e os pinos para baixo: pino 1 -> 3,3 V; pino 2 -> GPIO17 (BCM); pino 3 -> sem conexão; pino 4 -> GND. Use um pull-up de aproximadamente 4,7 kΩ entre DATA e 3,3 V. A documentação do driver alerta que o suporte pode variar em Linux 64-bit, então esta leitura precisa ser confirmada no hardware real.
+
+O MQ-2 usa apenas a saída digital DO no GPIO5 (BCM), não mede ppm; confirme se DO é ativo em LOW ou HIGH e use adaptação de nível se a saída ultrapassar 3,3 V. O botão de emergência com trava mecânica fica entre GPIO6 (BCM) e GND; após destravá-lo mecanicamente, pressione o botão de reset no GPIO13. O reset só limpa EMERGENCY quando o contato de emergência está inativo e as condições críticas de sensores/visão cessaram.
+
+Nos próximos acessos, ative o ambiente criado:
+
+```bash
+source .venv/bin/activate
+```
+
+Antes de enviar o projeto, valide o loop simulado sem periféricos:
+
+```bash
+python -m raspberry_pi.main --mock --cycles 2
+```
+
+Esse comando não valida GPIO, DHT22, câmera ou MQTT real. Os arquivos de modelos ONNX não estão incluídos no repositório; a inferência só poderá ser testada após fornecer modelos treinados compatíveis com as classes configuradas.
+
+Para validar a PS3 Eye antes de obter os modelos, rode um teste de captura independente:
+
+```bash
+python -m raspberry_pi.main --camera-test --camera-device 0 --camera-test-frames 30
+```
+
+O comando informa quantos frames foram capturados, FPS e resolução, e encerra sem iniciar GPIO/MQTT. Para testar o broker instalado no Pi, inicie o serviço (`sudo systemctl enable --now mosquitto`) e valide localmente com `mosquitto_pub`/`mosquitto_sub`; acesso do dashboard pela rede exige configuração adicional do broker e não deve ser aberto sem autenticação.
 
 Use o mesmo segredo de pelo menos 16 caracteres no Raspberry e no computador do dashboard para proteger o stream. Exemplo de execução no Pi com os dois modelos. O modelo de acesso começa desabilitado; pressione `A` no terminal para alterná-lo.
 

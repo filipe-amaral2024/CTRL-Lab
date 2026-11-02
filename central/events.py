@@ -24,9 +24,15 @@ class SystemEvent:
             safety_result = vision.get("safety", vision.get("lab"))
             access_result = vision.get("access", vision.get("entry"))
 
-        if payload.get("smoke_detected") is True:
+        if payload.get("emergency_button_pressed") is True:
+            event_type = "SAFETY"
+            description = "Botão de emergência pressionado"
+        elif payload.get("smoke_detected") is True:
             event_type = "SENSOR"
             description = "Fumaça detectada"
+        elif payload.get("gas_detected") is True:
+            event_type = "SENSOR"
+            description = "Gás acima do limiar configurado"
         elif float(payload.get("gas_ppm", 0.0) or 0.0) >= 0.7:
             event_type = "SENSOR"
             description = "Gás em nível crítico"

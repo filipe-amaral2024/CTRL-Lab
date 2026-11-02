@@ -25,15 +25,35 @@ logger = logging.getLogger(__name__)
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Servidor Raspberry do projeto CTRL-Lab")
-    parser.add_argument("--mock", action="store_true", help="Força uso de GPIO em modo mock")
+    parser.add_argument(
+        "--mock",
+        action="store_true",
+        help="Força leituras simuladas e saídas GPIO sem hardware",
+    )
     parser.add_argument("--broker", default="localhost", help="Endereço do broker MQTT")
     parser.add_argument("--interval", type=float, default=2.0, help="Intervalo entre leituras em segundos")
     parser.add_argument("--cycles", type=int, default=0, help="Número de ciclos antes encerrar. 0 = loop infinito")
+    parser.add_argument(
+        "--mq2-active-high",
+        action="store_true",
+        help="Use se a saída DO do módulo MQ-2 ficar HIGH quando detectar gás",
+    )
     parser.add_argument(
         "--camera-device",
         type=int,
         default=0,
         help="Índice da câmera USB PS3 Eye (padrão: 0)",
+    )
+    parser.add_argument(
+        "--camera-test",
+        action="store_true",
+        help="Testa a captura da câmera sem exigir modelos ONNX",
+    )
+    parser.add_argument(
+        "--camera-test-frames",
+        type=int,
+        default=30,
+        help="Quantidade de frames capturados em --camera-test",
     )
     parser.add_argument("--safety-model", help="ONNX do modelo contínuo de fumaça/incêndio")
     parser.add_argument("--access-model", help="ONNX opcional do modelo de verificação de EPI/acesso")
@@ -71,6 +91,33 @@ def _parse_classes(class_names):
     return [name.strip() for name in class_names.split(",") if name.strip()]
 
 
+def _run_camera_test(camera, frame_count):
+    started_at = time.monotonic()
+    frames = 0
+    frame_shape = None
+    try:
+        camera.open()
+        for _ in range(frame_count):
+            frame = camera.read_frame()
+            if frame is None:
+                raise RuntimeError(
+                    camera.last_error or "Não foi possível capturar um frame."
+                )
+            frame_shape = getattr(frame, "shape", None)
+            frames += 1
+    finally:
+        camera.close()
+
+    elapsed = time.monotonic() - started_at
+    logger.info(
+        "Teste de câmera concluído: %d frames em %.2fs (%.2f FPS), resolução=%s",
+        frames,
+        elapsed,
+        frames / elapsed if elapsed > 0 else 0.0,
+        frame_shape,
+    )
+
+
 def _handle_access_command(payload, vision_service):
     if not isinstance(payload, dict):
         logger.warning("Comando MQTT inválido: era esperado um objeto JSON.")
@@ -98,6 +145,8 @@ def main():
         raise SystemExit("--access-model exige --safety-model para manter a checagem de segurança ativa.")
     if args.camera_device < 0:
         raise SystemExit("--camera-device deve ser zero ou maior.")
+    if args.camera_test_frames <= 0:
+        raise SystemExit("--camera-test-frames deve ser maior que zero.")
     if args.inference_interval <= 0:
         raise SystemExit("--inference-interval deve ser maior que zero.")
     if args.image_size <= 0:
@@ -111,10 +160,21 @@ def main():
     if args.camera_stream_token and not args.safety_model:
         raise SystemExit("--camera-stream-token exige --safety-model para ativar a câmera.")
 
+    if args.camera_test:
+        from app.cameras.entry_camera import CameraConfig, StreamCamera
+
+        camera = StreamCamera(
+            CameraConfig(name="ps3_eye", width=640, height=480),
+            fallback_device=args.camera_device,
+        )
+        _run_camera_test(camera, args.camera_test_frames)
+        return
+
     config = RaspberryConfig(
         use_mock_hardware=args.mock,
         mqtt_broker=args.broker,
         read_interval_seconds=args.interval,
+        mq2_active_low=not args.mq2_active_high,
     )
 
     vision_service = None
@@ -169,7 +229,7 @@ def main():
             lambda payload: _handle_access_command(payload, active_vision_service)
         )
 
-    monitor = EnvironmentMonitor(config)
+    monitor = EnvironmentMonitor(config, gpio_controller=gpio)
     manager = AlertManager(config, mqtt_client=mqtt_client, gpio_controller=gpio)
     keyboard_listener = (
         KeyboardShortcutListener(vision_service.toggle_access)
@@ -196,11 +256,14 @@ def main():
                 vision_details=vision_snapshot["details"] if vision_snapshot else None,
             )
             logger.info(
-                "Leitura -> temp=%.2fC umid=%.2f%% gas=%.3f smoke=%s => %s",
+                "Leitura -> temp=%sC umid=%s%% gas_ppm=%s gas_detected=%s "
+                "smoke=%s emergency_button=%s => %s",
                 reading.temperature_c,
                 reading.humidity_pct,
                 reading.gas_ppm,
+                reading.gas_detected,
                 reading.smoke_detected,
+                reading.emergency_button_pressed,
                 state.value,
             )
 
@@ -216,9 +279,14 @@ def main():
             camera_stream_server.stop()
         if vision_service is not None:
             vision_service.stop()
-        manager.shutdown()
-        if mqtt_client is not None:
-            mqtt_client.disconnect()
+        try:
+            monitor.close()
+        finally:
+            try:
+                manager.shutdown()
+            finally:
+                if mqtt_client is not None:
+                    mqtt_client.disconnect()
 
 
 if __name__ == "__main__":
