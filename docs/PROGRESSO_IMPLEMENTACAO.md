@@ -63,12 +63,12 @@ O Raspberry concentra a execução e as decisões de visão, além das tarefas e
 
 - leitura de temperatura e umidade por DHT22 opcional;
 - leitura digital do limiar DO do MQ-2 (sem cálculo de ppm);
-- botão de emergência com contato mecanicamente travado e botão separado de reset; emergência só limpa após destravar o botão e confirmar ausência de risco crítico;
+- botão de emergência com contato mecanicamente travado e botão separado de reset; câmera/visão e saídas são pausadas durante emergência, enquanto sensores, botões e MQTT/status permanecem ativos; o reset aguarda uma inferência visual segura e riscos críticos ausentes;
 - teste de captura da PS3 Eye por CLI sem exigir modelos ONNX;
 - valores simulados de sensores somente quando executado com `--mock`;
 - publicação como indisponíveis dos sensores físicos que não estão conectados/implementados;
 - estados do sistema: NORMAL, WARNING, ALERT e EMERGENCY;
-- controle de LEDs, buzzer e sirene via abstração de hardware;
+- controle do buzzer via abstração de hardware; LEDs e sirene não são usados;
 - compatibilidade com modo mock para execução sem Raspberry real;
 - comunicação base para MQTT;
 - inferência CPU com OpenCV DNN e YOLOv8 ONNX, sem PyTorch no Pi;
@@ -132,7 +132,7 @@ O projeto agora conta com duas opções de detector:
 
 O dashboard está disponível em `central/dashboard.py` e sua integração usa `CentralMQTTListener.set_access_model_enabled(enabled)`, que publica o comando no tópico MQTT `ctrlab/central/commands`. O controle recebe confirmação de estado em `vision.access.enabled` dentro do status publicado.
 
-O repositório não contém pesos. É necessário fornecer um ONNX YOLOv8 treinado para as classes `person`, `lab_coat`, `safety_glasses`, `closed_shoes`, `tied_hair`, `smoke` e `fire` (ou configurar a lista correspondente).
+O repositório não contém pesos. É necessário fornecer um ONNX YOLOv8 treinado para as classes `person`, `lab_coat`, `trousers`, `closed_shoes`, `long_hair`, `tied_hair`, `smoke` e `fire` (ou configurar as listas correspondentes). O cabelo preso só é exigido quando o modelo detectar cabelo comprido.
 
 Arquivos principais:
 

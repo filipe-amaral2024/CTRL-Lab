@@ -8,9 +8,8 @@ class PPEEvaluator:
 
     REQUIRED_EQUIPMENT = {
         "lab_coat": "Jaleco ausente",
-        "safety_glasses": "Óculos ausentes",
-        "closed_shoes": "Calçado inadequado",
-        "tied_hair": "Cabelo não preso",
+        "trousers": "Calça ausente",
+        "closed_shoes": "Calçado fechado ausente",
     }
 
     def evaluate(self, detections: Dict[str, bool]) -> Dict[str, object]:
@@ -20,6 +19,9 @@ class PPEEvaluator:
             present = bool(detections.get(key, False))
             if not present:
                 reasons.append(message)
+
+        if detections.get("long_hair", False) and not detections.get("tied_hair", False):
+            reasons.append("Cabelo comprido não está amarrado")
 
         status = "PERMITIDO" if not reasons else "ALERTA"
 

@@ -166,8 +166,9 @@ Criar o primeiro módulo específico do projeto.
 ```text
 person
 lab_coat
-safety_glasses
+trousers
 closed_shoes
+long_hair
 tied_hair
 ```
 
@@ -196,14 +197,14 @@ Depois criar/adaptar um dataset próprio e realizar fine-tuning.
 O modelo não deve simplesmente produzir:
 
 ```text
-"óculos detectado"
+"jaleco detectado"
 ```
 
 O sistema precisa transformar a detecção em uma decisão:
 
 ```text
-Óculos = SIM
 Jaleco = SIM
+Calça = SIM
 Calçado fechado = NÃO
 
 → ACESSO NEGADO
@@ -235,8 +236,9 @@ Decisão
 ```python
 detections = {
     "lab_coat": True,
-    "safety_glasses": True,
+    "trousers": True,
     "closed_shoes": False,
+    "long_hair": False,
     "tied_hair": True
 }
 ```
@@ -460,11 +462,8 @@ Transformar decisões do software em ações físicas.
 
 ## Possíveis dispositivos
 
-- LED verde → sistema normal.
-- LED amarelo → alerta.
-- LED vermelho → emergência.
-- Buzzer → alerta sonoro.
-- Sirene → emergência.
+- Dashboard → estado do sistema.
+- Buzzer → alerta sonoro em WARNING/ALERT; desligado durante EMERGENCY.
 
 ## Fluxo
 
@@ -482,10 +481,8 @@ Atuador
 
 ## Tarefas
 
-- [ ] Controlar LED.
 - [ ] Controlar buzzer.
-- [ ] Controlar sirene.
-- [ ] Criar função de desligamento/reset.
+- [x] Pausar câmera/visão e desligar saídas na emergência; reativar após reset e confirmação visual segura.
 - [ ] Testar estados.
 
 ---
@@ -543,7 +540,7 @@ Criar no computador uma interface web para apresentação e monitoramento, acess
 ├──────────────────┬──────────────────────┤
 │ EPI              │ Ambiente             │
 │ ✓ Jaleco         │ Temperatura: 25 °C   │
-│ ✓ Óculos         │ Gás: Normal          │
+│ ✓ Calça          │ Gás: Normal          │
 │ ✓ Calçado        │ Fumaça: Normal       │
 ├──────────────────┴──────────────────────┤
 │ STATUS: NORMAL                          │
@@ -601,10 +598,10 @@ o dashboard deve mostrar:
 🔥 EMERGÊNCIA
 
 Incêndio detectado.
-Alarme acionado.
+Câmera/visão pausada; buzzer desligado.
 ```
 
-E o Raspberry deve receber o comando para acionar a sirene.
+Com modelo de segurança configurado, após destravar o botão de emergência o reset reativa a visão e só libera o sistema quando a inferência confirmar condição segura e não houver risco crítico nos sensores. Sem o modelo, o reset só revalida sensores e botões; não há confirmação visual.
 
 ---
 
@@ -614,7 +611,7 @@ E o Raspberry deve receber o comando para acionar a sirene.
 
 - [ ] Pessoa com todos os EPIs.
 - [ ] Pessoa sem jaleco.
-- [ ] Pessoa sem óculos.
+- [ ] Pessoa sem calça.
 - [ ] Pessoa com calçado inadequado.
 - [ ] Pessoa com cabelo solto.
 - [ ] Diferentes iluminações.
@@ -832,7 +829,7 @@ Câmera detecta fumaça
         ↓
 Modelo no Raspberry identifica fumaça
         ↓
-Raspberry classifica como emergência e aciona a sirene
+Raspberry classifica como emergência, pausa a câmera/visão e mantém sensores, botões e MQTT ativos
         ↓
 Evento MQTT é recebido e registrado no computador
         ↓

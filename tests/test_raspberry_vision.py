@@ -77,6 +77,41 @@ class RaspberryVisionServiceTests(unittest.TestCase):
         self.assertEqual(preview[1], b"jpeg")
         self.assertGreater(camera.read_count, 1)
 
+    def test_stopped_vision_can_restart_for_safe_reset_verification(self):
+        camera = DummyCamera("frame")
+        service = RaspberryVisionService(
+            camera=camera,
+            safety_detector=SafetyDetector(),
+            inference_interval_seconds=0.01,
+            preview_enabled=True,
+        )
+        fake_cv2 = SimpleNamespace(
+            imencode=lambda extension, frame: (
+                True,
+                SimpleNamespace(tobytes=lambda: b"jpeg"),
+            )
+        )
+
+        with patch("raspberry_pi.vision.cv2", fake_cv2):
+            service.start()
+            deadline = time.monotonic() + 2
+            while not service.snapshot()["safety_ready"] and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertTrue(service.snapshot()["safety_ready"])
+
+            self.assertTrue(service.stop())
+            paused = service.snapshot()
+            self.assertFalse(paused["safety_ready"])
+            self.assertEqual(paused["details"]["safety"]["risk"], "PAUSADO")
+            self.assertIsNone(service.latest_preview())
+
+            service.start()
+            deadline = time.monotonic() + 2
+            while not service.snapshot()["safety_ready"] and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertTrue(service.snapshot()["safety_ready"])
+            self.assertTrue(service.stop())
+
     def test_safety_runs_continuously_and_access_is_opt_in_on_same_frame(self):
         camera = DummyCamera("ps3-eye-frame")
         safety_detector = SafetyDetector(
@@ -86,7 +121,7 @@ class RaspberryVisionServiceTests(unittest.TestCase):
             [
                 DetectionResult("person", 0.95),
                 DetectionResult("lab_coat", 0.90),
-                DetectionResult("safety_glasses", 0.88),
+                DetectionResult("trousers", 0.88),
             ]
         )
         service = RaspberryVisionService(
@@ -108,7 +143,10 @@ class RaspberryVisionServiceTests(unittest.TestCase):
 
         self.assertEqual(enabled_result["state"], SystemState.EMERGENCY)
         self.assertEqual(enabled_result["details"]["access"]["status"], "ALERTA")
-        self.assertIn("Calçado inadequado", enabled_result["details"]["access"]["reasons"])
+        self.assertIn(
+            "Calçado fechado ausente",
+            enabled_result["details"]["access"]["reasons"],
+        )
         self.assertEqual(safety_detector.frames, ["ps3-eye-frame", "ps3-eye-frame"])
         self.assertEqual(access_detector.frames, ["ps3-eye-frame"])
         self.assertEqual(camera.read_count, 2)
@@ -128,6 +166,58 @@ class RaspberryVisionServiceTests(unittest.TestCase):
         self.assertEqual(result["state"], SystemState.ALERT)
         self.assertEqual(safety_detector.frames, ["frame"])
         self.assertEqual(result["details"]["safety"]["risk"], "NORMAL")
+
+    def test_access_evaluation_uses_only_lab_trousers_shoes_and_long_hair_rules(self):
+        camera = DummyCamera("frame")
+        access_detector = AccessDetector(
+            [
+                DetectionResult("person", 0.95),
+                DetectionResult("lab_coat", 0.9),
+                DetectionResult("trousers", 0.9),
+                DetectionResult("closed_shoes", 0.9),
+            ]
+        )
+        service = RaspberryVisionService(
+            camera=camera,
+            safety_detector=SafetyDetector(),
+            access_detector=access_detector,
+        )
+        service.open()
+        service.set_access_enabled(True)
+
+        result = service.process_once()
+        service.stop()
+
+        self.assertEqual(result["details"]["access"]["status"], "PERMITIDO")
+        self.assertNotIn("safety_glasses", result["details"]["access"]["detections"])
+
+    def test_access_evaluation_requires_long_hair_to_be_tied(self):
+        camera = DummyCamera("frame")
+        access_detector = AccessDetector(
+            [
+                DetectionResult("person", 0.95),
+                DetectionResult("lab_coat", 0.9),
+                DetectionResult("trousers", 0.9),
+                DetectionResult("closed_shoes", 0.9),
+                DetectionResult("long_hair", 0.9),
+            ]
+        )
+        service = RaspberryVisionService(
+            camera=camera,
+            safety_detector=SafetyDetector(),
+            access_detector=access_detector,
+        )
+        service.open()
+        service.set_access_enabled(True)
+
+        result = service.process_once()
+        service.stop()
+
+        self.assertEqual(result["details"]["access"]["status"], "ALERTA")
+        self.assertIn(
+            "Cabelo comprido não está amarrado",
+            result["details"]["access"]["reasons"],
+        )
 
     def test_no_person_does_not_report_missing_ppe(self):
         camera = DummyCamera("entry")

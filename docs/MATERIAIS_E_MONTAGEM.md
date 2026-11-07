@@ -25,8 +25,7 @@ A câmera de celular via IP foi descartada por apresentar latência e travamento
 
 - Protoboard
 - Jumpers macho-fêmea e fêmea-fêmea
-- Resistores 220 Ω (3 unidades no mínimo)
-- LEDs vermelho, amarelo e verde
+- Resistores para pull-up do DHT22 e divisor de tensão do MQ-2, quando necessário
 - Buzzer
 - DHT22 (temperatura e umidade)
 - Sensor MQ-2 ou MQ-135 (gás/fumaça)
@@ -35,10 +34,7 @@ A câmera de celular via IP foi descartada por apresentar latência e travamento
 
 ### 2.3 Componentes opcionais
 
-- Sirene de 12V
-- Relé ou transistor para sirene
 - Módulo ADC para sensor analógico
-- Fonte dedicada para sirene/atuadores mais potentes
 
 ---
 
@@ -51,8 +47,6 @@ Se a intenção for começar com um protótipo simples e funcional, a lista mín
 - 1 microSD 32 GB
 - 1 fonte 5V 3A
 - 1 breadboard
-- 3 LEDs
-- 3 resistores 220 Ω
 - 1 buzzer
 - 1 DHT22
 - jumpers
@@ -62,9 +56,9 @@ Essa configuração já permite validar:
 - monitoramento ambiental de temperatura e umidade
 - lógica de alertas
 - comunicação com o computador central
-- acionamento de indicadores visuais e sonoros
+- estado no dashboard e alertas sonoros não críticos
 
-MQ-2 e botões são opcionais na primeira montagem. O runtime oferece suporte ao MQ-2 por saída digital DO, botão de emergência e botão de reset; não lê saída analógica nem calcula concentração em ppm.
+MQ-2 e botões são opcionais. O runtime oferece suporte ao MQ-2 por saída digital DO, botão de emergência e botão de reset; não lê saída analógica nem calcula concentração em ppm. Os LEDs montados não são mais usados pelo software e podem permanecer desconectados.
 
 ---
 
@@ -76,26 +70,13 @@ MQ-2 e botões são opcionais na primeira montagem. O runtime oferece suporte ao
 - Conectar protoboard ao GND e à alimentação 5V.
 - Garantir que a massa comum esteja organizada.
 
-### Etapa 2 — Montar LEDs indicativos
+### Etapa 2 — Montar buzzer
 
-- GPIO22 -> resistor 220 Ω -> ânodo do LED vermelho; cátodo -> GND
-- GPIO27 -> resistor 220 Ω -> ânodo do LED amarelo; cátodo -> GND
-- GPIO24 -> resistor 220 Ω -> ânodo do LED verde; cátodo -> GND
+- O único sinalizador sonoro do protótipo é o buzzer no GPIO23.
+- O buzzer pode ser acionado em WARNING/ALERT e fica desligado durante EMERGENCY.
+- Use um driver se o buzzer exigir mais corrente; não alimente carga de alta corrente diretamente pelo GPIO.
 
-Use os pinos GPIO em lógica de 3,3 V; não conecte 5 V a nenhum GPIO.
-
-Essa é a base visual do sistema para indicar:
-
-- NORMAL — verde
-- ALERTA — amarelo
-- EMERGÊNCIA — vermelho
-
-### Etapa 3 — Montar buzzer
-
-- Acione o buzzer pelo GPIO23 somente se o módulo for compatível com nível lógico de 3,3 V e consumir dentro do limite permitido pelo GPIO.
-- Para buzzer/sirene que exija mais corrente, use transistor ou módulo driver apropriado; não alimente a carga diretamente pelo GPIO.
-
-### Etapa 4 — Montar o DHT22
+### Etapa 3 — Montar o DHT22
 
 - VCC -> 3,3 V (confirme a especificação do sensor/módulo)
 - GND -> GND
@@ -110,26 +91,30 @@ Esse sensor permite medir:
 
 O runtime só usa leituras simuladas quando executado com `--mock`. No modo real, se a biblioteca ou o sensor não estiver disponível, os valores serão publicados como `null` e aparecerão como `—` no dashboard.
 
-### Etapa 5 — Montar o sensor de gás
+### Etapa 4 — Montar o sensor de gás
 
 - MQ-2 ou MQ-135 conforme disponibilidade
 - VCC -> 5V
 - GND -> GND
 - DO -> GPIO5 (BCM), usando adaptação de nível para garantir no máximo 3,3 V no GPIO
 
-Para um módulo cuja saída DO possa chegar a 5 V, use um divisor resistivo, por exemplo: DO -> resistor de 10 kΩ -> GPIO5; GPIO5 -> resistor de 20 kΩ -> GND. Una os GNDs do módulo e do Raspberry Pi. Um conversor de nível lógico apropriado também pode ser usado.
+Para um módulo cuja saída DO possa chegar a 5 V, use um divisor resistivo, por exemplo: DO -> resistor de 10 kΩ -> GPIO5; GPIO5 -> resistor de 15 kΩ -> GND. Una os GNDs do módulo e do Raspberry Pi. Um conversor de nível lógico apropriado também pode ser usado.
 
 **Não conecte OUT diretamente a um GPIO.** O Raspberry Pi não tem entrada analógica, e a saída digital de alguns módulos alimentados em 5 V também pode exceder os 3,3 V tolerados pelos GPIOs. A leitura analógica exige um ADC compatível e a leitura digital exige confirmar a tensão de saída e usar adaptação de nível quando necessário.
 
 O runtime usa somente a saída digital DO e a indica como `Detectado`/`Normal`; isso representa o limiar do comparador ajustado no módulo, não uma concentração em ppm. O padrão é saída ativa em LOW; use `--mq2-active-high` se o seu módulo indicar detecção em HIGH. Confirme no próprio módulo e meça a saída antes de conectar.
 
-### Etapa 6 — Botão de emergência
+### Etapa 5 — Botões de emergência e reset
 
 - Botão normalmente aberto entre GPIO6 (BCM) e GND; o runtime configura pull-up interno.
 - Botão normalmente aberto de reset entre GPIO13 (BCM) e GND; o runtime configura pull-up interno.
 - O botão de emergência é do tipo trava: ao acioná-lo, o contato permanece ativo até destravar mecanicamente o próprio botão, conforme o modelo instalado.
-- Depois de destravar mecanicamente o botão de emergência, pressione o botão separado de reset. Ele só libera EMERGENCY quando o contato de emergência está inativo e não há condição crítica ativa nos sensores ou na visão.
+- Depois de destravar mecanicamente o botão de emergência, pressione o botão separado de reset. Com o modelo de segurança configurado, a visão é reativada para confirmar condição segura; EMERGENCY só é liberado quando o contato de emergência está inativo e não há condição crítica nos sensores ou na visão. Sem o modelo, o reset só pode confirmar sensores e botões.
+- A solicitação de reset permanece pendente até concluir a verificação, mesmo se o botão for solto.
+- Durante EMERGENCY, câmera/visão e saídas ficam pausadas; Raspberry Pi, sensores, botões e MQTT/status permanecem ativos para permitir reset e acompanhar o estado.
 - Não conecte o botão a 3,3 V ou 5 V.
+
+Essa pausa é uma ação de software; não desliga a alimentação do Raspberry Pi nem substitui uma parada de emergência elétrica/certificada para equipamentos de potência.
 
 ---
 
@@ -151,7 +136,6 @@ Raspberry Pi:
 - Modelo de acesso/EPI somente quando habilitado
 - DHT22
 - MQ-2/MQ-135 pela saída digital DO (sem leitura em ppm)
-- LEDs
 - buzzer
 - botão de emergência e botão de reset
 - status e eventos via MQTT
@@ -172,7 +156,7 @@ python3 -m raspberry_pi.main \
   --safety-model models/ctrlab-safety.onnx \
   --access-model models/ctrlab-access.onnx \
   --safety-classes smoke,fire \
-  --access-classes person,lab_coat,safety_glasses,closed_shoes,tied_hair
+  --access-classes person,lab_coat,trousers,closed_shoes,long_hair,tied_hair
 ```
 
 O modelo de acesso inicia desabilitado, é carregado sob demanda e liberado da memória quando desativado. Pressione `A` no terminal ou use o botão do dashboard para alterná-lo. O comando usa o tópico `ctrlab/central/commands`; desabilitar o acesso não desliga a análise contínua de segurança. Os modelos devem conter suas classes na ordem configurada e gerar saída YOLOv8 sem NMS suportada pelo OpenCV DNN. O projeto fornece o runtime e a lógica, mas não inclui os pesos treinados. O MQTT publica resultados e o estado de ativação no tópico `ctrlab/raspberry/status`.
@@ -193,8 +177,8 @@ Libere a porta TCP 8000 no firewall do computador anfitrião para a rede local e
 
 ## 6. Ordem recomendada de montagem
 
-1. Montar Raspberry com LEDs e buzzer.
-2. Validar GPIO e estado visual do sistema.
+1. Montar Raspberry com o buzzer.
+2. Validar GPIO e estado pelo dashboard.
 3. Integrar DHT22 e testar temperatura/umidade.
 4. Validar comunicação MQTT.
 5. Conectar a PS3 Eye e validar a captura local.
@@ -210,7 +194,7 @@ Libere a porta TCP 8000 no firewall do computador anfitrião para a rede local e
 - Use a PS3 Eye fixa, enquadrando a área de acesso e a área que precisa de monitoramento de segurança.
 - Confirme que desligar o modelo de acesso não interrompe o modelo de segurança.
 - Faça a montagem em protoboard, fácil de demonstrar.
-- Use LEDs e buzzer para deixar a lógica visualmente clara.
+- Use o dashboard para acompanhar os estados; o buzzer sinaliza WARNING/ALERT e permanece desligado em EMERGENCY.
 - Mostre a transição entre NORMAL, ALERTA e EMERGÊNCIA.
 - Simule cenários como:
   - pessoa sem jaleco
@@ -227,7 +211,6 @@ Libere a porta TCP 8000 no firewall do computador anfitrião para a rede local e
 - [ ] atalho `A` alternando o modelo de acesso
 - [ ] comando MQTT alternando o modelo de acesso
 - [ ] Raspberry lendo sensores
-- [ ] LEDs funcionando
 - [ ] buzzer funcionando
 - [ ] MQTT funcionando
 - [ ] dashboard acessível pelo IP do computador anfitrião
@@ -243,7 +226,7 @@ Para reduzir latência e consumo de recursos:
 
 - usar somente uma câmera PS3 Eye USB para os dois modelos
 - manter a inferência do modelo de acesso desligada quando não for necessária
-- montar protótipo com LEDs + DHT22 + MQ-2 + buzzer
+- montar protótipo com DHT22 + MQ-2 + buzzer
 - validar primeiro a parte eletrônica e de comunicação
 - medir desempenho dos modelos na resolução configurada
 

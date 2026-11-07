@@ -69,6 +69,7 @@ class RaspberryVisionService:
         self._preview_sequence = 0
         self._preview_warning_logged = False
         self._opened = False
+        self._safety_ready = False
         self._access_enabled = False
         self._state = SystemState.NORMAL
         self._details: Dict[str, dict] = {}
@@ -79,13 +80,33 @@ class RaspberryVisionService:
         with self._lock:
             return self._access_detector is not None or self._access_detector_factory is not None
 
+    @property
+    def running(self) -> bool:
+        return self._worker is not None and self._worker.is_alive()
+
     def start(self):
-        if self._worker is not None and self._worker.is_alive():
+        if self.running:
             raise RuntimeError("O serviço de visão já está em execução.")
 
         if not self._opened:
             self.open()
 
+        with self._lock:
+            self._safety_ready = False
+            self._state = SystemState.NORMAL
+            self._error = None
+            access_enabled = self._access_enabled
+            self._details = {
+                "safety": {"risk": "AGUARDANDO", "detections": []},
+                "access": {
+                    "status": "AGUARDANDO" if access_enabled else "DESABILITADO",
+                    "enabled": access_enabled,
+                },
+            }
+        with self._frame_lock:
+            self._latest_frame = None
+            self._latest_preview = None
+        self._frame_ready.clear()
         self._stop_event.clear()
         if self.preview_enabled:
             self._capture_stop_event.clear()
@@ -183,6 +204,7 @@ class RaspberryVisionService:
                     access = {"status": "DESABILITADO", "enabled": False}
             details = {"safety": safety, "access": access}
             state = self._state_from_details(details)
+            self._safety_ready = True
             self._details = details
             self._state = state
             self._error = None
@@ -232,6 +254,7 @@ class RaspberryVisionService:
             "state": state,
             "details": details,
             "access_enabled": access_enabled,
+            "safety_ready": self._safety_ready,
         }
 
     def latest_preview(self):
@@ -244,19 +267,47 @@ class RaspberryVisionService:
         if self._worker is not None:
             self._worker.join(timeout=5.0)
             if self._worker.is_alive():
-                logger.warning("A thread de visão ainda aguarda uma leitura de câmera.")
-                return
+                logger.error("A thread de visão não encerrou; a câmera continua em uso.")
+                return False
             self._worker = None
         if self._capture_worker is not None:
             self._capture_worker.join(timeout=5.0)
             if self._capture_worker.is_alive():
-                logger.warning("A thread de captura ainda aguarda uma leitura da câmera.")
-                return
+                logger.error("A thread de captura não encerrou; a câmera continua em uso.")
+                return False
             self._capture_worker = None
 
         if self._opened:
             self.camera.close()
             self._opened = False
+        with self._lock:
+            self._safety_ready = False
+            self._state = SystemState.NORMAL
+            self._error = None
+            if self._access_detector_factory is not None:
+                self._access_detector = None
+            access_configured = (
+                self._access_detector is not None
+                or self._access_detector_factory is not None
+            )
+            if not access_configured:
+                access_status = "NAO_CONFIGURADO"
+            elif self._access_enabled:
+                access_status = "PAUSADO"
+            else:
+                access_status = "DESABILITADO"
+            self._details = {
+                "safety": {"risk": "PAUSADO", "detections": []},
+                "access": {
+                    "status": access_status,
+                    "enabled": self._access_enabled,
+                },
+            }
+        with self._frame_lock:
+            self._latest_frame = None
+            self._latest_preview = None
+        self._frame_ready.clear()
+        return True
 
     def _run(self):
         try:
@@ -360,8 +411,9 @@ class RaspberryVisionService:
             {
                 "person": True,
                 "lab_coat": "lab_coat" in labels,
-                "safety_glasses": "safety_glasses" in labels,
+                "trousers": "trousers" in labels,
                 "closed_shoes": "closed_shoes" in labels,
+                "long_hair": "long_hair" in labels,
                 "tied_hair": "tied_hair" in labels,
             }
         )

@@ -16,11 +16,7 @@ class RaspberryConfig:
 
     # GPIO BCM (Raspberry Pi)
     dht_pin: int = 17
-    red_led_pin: int = 22
-    yellow_led_pin: int = 27
-    green_led_pin: int = 24
     buzzer_pin: int = 23
-    siren_pin: int = 18
     mq2_digital_pin: int = 5
     emergency_button_pin: int = 6
     reset_button_pin: int = 13
@@ -36,14 +32,8 @@ class RaspberryConfig:
     read_interval_seconds: float = 2.0
 
     @property
-    def pins(self):
-        return {
-            "red": self.red_led_pin,
-            "yellow": self.yellow_led_pin,
-            "green": self.green_led_pin,
-            "buzzer": self.buzzer_pin,
-            "siren": self.siren_pin,
-        }
+    def output_pins(self):
+        return (self.buzzer_pin,)
 
     @property
     def input_pins(self):

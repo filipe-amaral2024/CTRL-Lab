@@ -21,6 +21,15 @@ class AlertManager:
         self.gpio = gpio_controller
         self.state = SystemState.NORMAL
         self._emergency_latched = False
+        self._reset_requested = False
+
+    @property
+    def emergency_latched(self):
+        return self._emergency_latched
+
+    @property
+    def reset_requested(self):
+        return self._reset_requested
 
     def evaluate(self, reading):
         if (
@@ -54,7 +63,7 @@ class AlertManager:
 
         return SystemState.NORMAL
 
-    def update(self, reading, vision_state=None, vision_details=None):
+    def update(self, reading, vision_state=None, vision_details=None, vision_ready=True):
         live_state = self.evaluate(reading)
         if vision_state is not None:
             priorities = {
@@ -70,11 +79,20 @@ class AlertManager:
             self._emergency_latched = True
 
         if (
-            reading.reset_button_pressed is True
+            self._emergency_latched
+            and reading.reset_button_pressed is True
+            and reading.emergency_button_pressed is not True
+        ):
+            self._reset_requested = True
+
+        if (
+            self._reset_requested
             and reading.emergency_button_pressed is not True
             and live_state != SystemState.EMERGENCY
+            and vision_ready
         ):
             self._emergency_latched = False
+            self._reset_requested = False
 
         new_state = (
             SystemState.EMERGENCY
@@ -91,30 +109,7 @@ class AlertManager:
         if self.gpio is None:
             return
 
-        if state == SystemState.NORMAL:
-            self.gpio.set_led("green", True)
-            self.gpio.set_led("yellow", False)
-            self.gpio.set_led("red", False)
-            self.gpio.set_buzzer(False)
-            self.gpio.set_siren(False)
-        elif state == SystemState.WARNING:
-            self.gpio.set_led("green", False)
-            self.gpio.set_led("yellow", True)
-            self.gpio.set_led("red", False)
-            self.gpio.set_buzzer(True)
-            self.gpio.set_siren(False)
-        elif state == SystemState.ALERT:
-            self.gpio.set_led("green", False)
-            self.gpio.set_led("yellow", True)
-            self.gpio.set_led("red", True)
-            self.gpio.set_buzzer(True)
-            self.gpio.set_siren(False)
-        elif state == SystemState.EMERGENCY:
-            self.gpio.set_led("green", False)
-            self.gpio.set_led("yellow", False)
-            self.gpio.set_led("red", True)
-            self.gpio.set_buzzer(True)
-            self.gpio.set_siren(True)
+        self.gpio.set_buzzer(state in (SystemState.WARNING, SystemState.ALERT))
 
     def _publish_status(self, reading, state, vision_details=None):
         if self.mqtt_client is None:

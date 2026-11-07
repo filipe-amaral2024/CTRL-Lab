@@ -76,6 +76,16 @@ class MQTTClientWrapper:
             logger.warning("Erro ao publicar alerta: %s", exc)
             return False
 
+    def publish(self, topic: str, payload: str, qos: int = 1):
+        if self._client is None:
+            return False
+
+        try:
+            return self._client.publish(topic, payload, qos=qos)
+        except Exception as exc:  # pragma: no cover - depende da rede
+            logger.warning("Falha ao publicar no tópico %s: %s", topic, exc)
+            return False
+
     def _on_connect(self, client, userdata, flags, rc):
         self._connected = rc == 0
         logger.info("Conectado ao broker MQTT com código %s", rc)

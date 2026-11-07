@@ -184,6 +184,7 @@
     let controlAvailable = false;
     let controlRequiresToken = true;
     let cameraRetryTimer = null;
+    let cameraPaused = false;
 
     function setText(id, value) {
       $(id).textContent = value == null ? "—" : value;
@@ -247,7 +248,19 @@
         const state = String(status.state || "NORMAL").toUpperCase();
         setText("systemState", state);
         $("systemState").className = `state-value ${state}`;
-        setText("systemMessage", state === "NORMAL" ? "Nenhum risco reportado." : "O sistema reportou uma condição que requer atenção.");
+        setText(
+          "systemMessage",
+          state === "EMERGENCY"
+            ? "Emergência: câmera/visão e atuadores pausados. Destrave o botão e pressione reset após cessar o risco."
+            : state === "NORMAL"
+              ? "Nenhum risco reportado."
+              : "O sistema reportou uma condição que requer atenção."
+        );
+        if (state === "EMERGENCY" && !cameraPaused) {
+          pauseCamera();
+        } else if (state !== "EMERGENCY" && cameraPaused) {
+          resumeCamera();
+        }
         setText("temperature", formatNumber(status.temperature_c, " °C"));
         setText("humidity", formatNumber(status.humidity_pct, " %"));
         setText("gas", typeof status.gas_detected === "boolean"
@@ -307,10 +320,25 @@
 
     function connectCamera() {
       window.clearTimeout(cameraRetryTimer);
+      if (cameraPaused) return;
       const feed = $("cameraFeed");
       feed.hidden = true;
       setText("cameraMessage", "Conectando à câmera do Raspberry Pi…");
       feed.src = `/api/camera.mjpg?ts=${Date.now()}`;
+    }
+
+    function pauseCamera() {
+      cameraPaused = true;
+      window.clearTimeout(cameraRetryTimer);
+      const feed = $("cameraFeed");
+      feed.removeAttribute("src");
+      feed.hidden = true;
+      setText("cameraMessage", "Câmera pausada durante a emergência. Use o botão de reset após cessar o risco.");
+    }
+
+    function resumeCamera() {
+      cameraPaused = false;
+      connectCamera();
     }
 
     $("cameraFeed").addEventListener("load", () => {
@@ -318,6 +346,7 @@
       setText("cameraMessage", "PS3 Eye · transmissão ao vivo");
     });
     $("cameraFeed").addEventListener("error", () => {
+      if (cameraPaused) return;
       $("cameraFeed").hidden = true;
       setText("cameraMessage", "Câmera indisponível. Verifique a conexão, o token e se a visão está em execução.");
       cameraRetryTimer = window.setTimeout(connectCamera, 5000);

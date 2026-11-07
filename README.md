@@ -27,7 +27,8 @@ Desenvolver um sistema capaz de verificar condições básicas de segurança no 
 - Habilitar/desabilitar a análise de acesso sem interromper a checagem de segurança.
 - Detectar visualmente fumaça e possíveis sinais de incêndio.
 - Integrar sensores ambientais ao sistema.
-- Acionar LEDs, buzzer ou sirene em situações de alerta.
+- Exibir o estado pelo dashboard e acionar o buzzer em alertas não críticos.
+- Pausar câmera/visão e desligar as saídas físicas durante uma emergência, mantendo Raspberry Pi, botões e MQTT ativos para permitir reset e monitoramento.
 - Registrar eventos e ocorrências.
 - Disponibilizar uma interface para acompanhamento do sistema.
 - Demonstrar a integração entre inteligência artificial, software, sensores e sistemas embarcados.
@@ -50,12 +51,12 @@ O sistema deverá:
    - `PERMITIDO`
    - `ALERTA — EPI INADEQUADO`
 
-Os itens inicialmente considerados são:
+Os requisitos do laboratório são:
 
-- Jaleco de manga comprida.
-- Óculos de proteção.
-- Calçado fechado.
-- Cabelo devidamente preso, quando aplicável.
+- Jaleco.
+- Calça.
+- Tênis/calçado fechado.
+- Cabelo amarrado somente quando comprido.
 
 > O objetivo é verificar condições de segurança, e não identificar a identidade da pessoa. O projeto não depende de reconhecimento facial.
 
@@ -76,7 +77,7 @@ O modelo de segurança deve permanecer ativo durante toda a execução visual e 
 | Segurança (fumaça/fogo) | Sempre ativo | Não pode ser desligado pelo dashboard ou teclado |
 | Acesso (pessoa/EPI) | Desabilitado | Tecla `A` no terminal ou comando MQTT do dashboard |
 
-Ao desabilitar o modelo de acesso, a câmera e o modelo de segurança continuam funcionando.
+Ao desabilitar o modelo de acesso, a câmera e o modelo de segurança continuam funcionando. Durante uma emergência, o runtime pausa câmera e visão, desliga buzzer e demais saídas, mas mantém sensores, botões, Raspberry Pi e telemetria ativos. O reset inicia uma nova verificação de segurança; a operação só retorna após uma inferência segura e a ausência de riscos críticos.
 
 ---
 
@@ -100,9 +101,7 @@ Uma câmera, por exemplo, não consegue detectar diretamente um gás invisível.
 Quando uma situação inadequada for detectada, o sistema poderá:
 
 - Exibir um alerta no computador.
-- Acender LEDs.
-- Acionar um buzzer.
-- Acionar uma sirene.
+- Acionar o buzzer em `WARNING`/`ALERT`; ele fica desligado durante uma emergência.
 - Registrar o evento.
 - Alterar o estado do sistema para `ALERTA` ou `EMERGÊNCIA`.
 
@@ -136,8 +135,7 @@ PS3 Eye USB ──► Raspberry Pi 3B+
 - Mantém segurança contínua mesmo quando a análise de acesso está desabilitada.
 - Análise de EPIs e detecção visual de fumaça/incêndio.
 - Leitura dos sensores.
-- Controle de LEDs.
-- Controle de buzzer/sirene.
+- Controle do buzzer apenas em `WARNING`/`ALERT`; durante `EMERGENCY`, o buzzer e a câmera/visão são pausados.
 - Decisão e acionamento local dos alertas, sem depender do computador.
 
 ---
@@ -160,10 +158,8 @@ PS3 Eye USB ──► Raspberry Pi 3B+
 - Raspberry Pi 3B+
 - Uma câmera PS3 Eye USB
 - Sensores ambientais
-- LEDs
 - Resistores
 - Buzzer
-- Sirene, se disponível
 - Botão de emergência/reset
 - Fonte e componentes de prototipagem
 
@@ -178,7 +174,7 @@ Serão utilizadas bibliotecas e modelos existentes, principalmente:
 - **OpenCV DNN** para inferência local com o modelo YOLOv8 ONNX.
 - **Ultralytics**, opcional na máquina de desenvolvimento, para exportar modelos treinados.
 
-Os modelos são arquivos ONNX separados, com lista de classes própria: `smoke,fire` para segurança e `person,lab_coat,safety_glasses,closed_shoes,tied_hair` para acesso/EPI.
+Os modelos são arquivos ONNX separados, com lista de classes própria: `smoke,fire` para segurança e `person,lab_coat,trousers,closed_shoes,long_hair,tied_hair` para acesso/EPI.
 
 O modelo de acesso pode ser ligado/desligado durante a execução pelo atalho `A` no terminal ou pelo dashboard via MQTT. Esse controle nunca desativa a checagem de segurança.
 
@@ -187,10 +183,13 @@ O modelo de acesso pode ser ligado/desligado durante a execução pelo atalho `A
 ```text
 person
 lab_coat
-safety_glasses
+trousers
 closed_shoes
+long_hair
 tied_hair
 ```
+
+`tied_hair` só é obrigatório quando `long_hair` também for detectado. O modelo deve ser treinado para distinguir essas classes; ausência de detecção de cabelo comprido é interpretada como não aplicável.
 
 ### Possíveis classes do modelo contínuo de segurança
 
@@ -212,14 +211,15 @@ Exemplo:
 ```text
 Detecções:
 - Jaleco: SIM
-- Óculos: SIM
+- Calça: SIM
 - Calçado fechado: NÃO
-- Cabelo preso: SIM
+- Cabelo comprido: SIM
+- Cabelo preso: NÃO
 
 Resultado:
-ACESSO NEGADO
+ACESSO EM ALERTA
 Motivo:
-Calçado inadequado
+Calçado fechado ausente
 ```
 
 ---
@@ -248,7 +248,7 @@ Existe uma condição que exige atenção, mas não necessariamente uma emergên
 
 Exemplo:
 
-- Pessoa sem óculos de proteção.
+- Pessoa sem calça ou calçado fechado; cabelo comprido sem estar preso.
 - Pessoa sem jaleco.
 
 ### EMERGÊNCIA
@@ -272,7 +272,7 @@ Exemplo:
 
 | Data/Hora | Tipo | Descrição | Estado |
 |---|---|---|---|
-| 10:30 | EPI | Pessoa sem óculos | ALERTA |
+| 10:30 | EPI | Pessoa sem jaleco | ALERTA |
 | 10:42 | EPI | Acesso permitido | NORMAL |
 | 11:05 | FUMAÇA | Fumaça detectada | EMERGÊNCIA |
 | 11:06 | SENSOR | Temperatura elevada | EMERGÊNCIA |
@@ -382,7 +382,7 @@ A base do módulo Raspberry já foi iniciada no diretório `raspberry_pi/` com:
 
 - leitura de sensores ambientais;
 - gerenciamento de estados do sistema (`NORMAL`, `WARNING`, `ALERT`, `EMERGENCY`);
-- controle de LEDs e buzzer/sirene em abstração de hardware;
+- controle do buzzer em abstração de hardware;
 - suporte a modo mock para testes sem hardware físico;
 - preparação para comunicação MQTT com o computador central.
 
@@ -439,11 +439,13 @@ python -m pip install adafruit-circuitpython-dht
 
 Instale também a biblioteca de sistema `libgpiod` correspondente à versão do Raspberry Pi OS (por exemplo, `libgpiod2` no Bookworm ou `libgpiod3` no Trixie), caso exigida pelo pacote do DHT22.
 
-O ambiente virtual usa pacotes do sistema para permitir o acesso à biblioteca GPIO instalada pelo Raspberry Pi OS. O controle físico requer uma implementação compatível com `RPi.GPIO` para o modelo do Raspberry Pi e a versão do sistema. No modo real, se a biblioteca não estiver disponível, o programa registra um aviso e usa saídas simuladas; confirme a inicialização do GPIO antes de conectar LEDs ou buzzer.
+O ambiente virtual usa pacotes do sistema para permitir o acesso à biblioteca GPIO instalada pelo Raspberry Pi OS. O controle físico requer uma implementação compatível com `RPi.GPIO` para o modelo do Raspberry Pi e a versão do sistema. Se a biblioteca não estiver disponível, o programa registra um aviso e usa GPIO simulado; não considere isso uma atuação física. Confirme a inicialização do GPIO antes dos testes.
 
 O `adafruit-circuitpython-dht` habilita o DHT22 avulso; instale a versão de `libgpiod` compatível com a versão do sistema quando exigida pelo driver. Olhando a grade do DHT22 de frente e os pinos para baixo: pino 1 -> 3,3 V; pino 2 -> GPIO17 (BCM); pino 3 -> sem conexão; pino 4 -> GND. Use um pull-up de aproximadamente 4,7 kΩ entre DATA e 3,3 V. A documentação do driver alerta que o suporte pode variar em Linux 64-bit, então esta leitura precisa ser confirmada no hardware real.
 
-O MQ-2 usa apenas a saída digital DO no GPIO5 (BCM), não mede ppm; confirme se DO é ativo em LOW ou HIGH e use adaptação de nível se a saída ultrapassar 3,3 V. O botão de emergência com trava mecânica fica entre GPIO6 (BCM) e GND; após destravá-lo mecanicamente, pressione o botão de reset no GPIO13. O reset só limpa EMERGENCY quando o contato de emergência está inativo e as condições críticas de sensores/visão cessaram.
+O MQ-2 usa apenas a saída digital DO no GPIO5 (BCM), não mede ppm; confirme se DO é ativo em LOW ou HIGH e use adaptação de nível se a saída ultrapassar 3,3 V. O botão de emergência com trava mecânica fica entre GPIO6 (BCM) e GND; após destravá-lo mecanicamente, pressione o botão de reset no GPIO13. Com modelo de segurança configurado, o reset reinicia a visão e aguarda inferência segura e ausência de riscos críticos. A solicitação de reset é mantida enquanto a visão executa essa verificação, mesmo se o botão for solto. Sem modelo de segurança, só é possível validar os sensores conectados; não há confirmação visual.
+
+Esta parada é implementada por software e não substitui uma parada de emergência elétrica/certificada: não interrompe a alimentação do Raspberry Pi nem oferece isolamento de potência dos equipamentos.
 
 Nos próximos acessos, ative o ambiente criado:
 
@@ -477,7 +479,7 @@ python3 -m raspberry_pi.main \
   --safety-model models/ctrlab-safety.onnx \
   --access-model models/ctrlab-access.onnx \
   --safety-classes smoke,fire \
-  --access-classes person,lab_coat,safety_glasses,closed_shoes,tied_hair \
+  --access-classes person,lab_coat,trousers,closed_shoes,long_hair,tied_hair \
   --image-size 320 \
   --inference-interval 3
 ```
@@ -490,7 +492,7 @@ O serviço pode ser executado apenas com segurança, omitindo `--access-model`. 
 
 Use `enabled: false` para desabilitar o modelo de acesso. O serviço publica `vision.access.enabled` junto aos resultados no tópico `ctrlab/raspberry/status`. O modelo de segurança não possui comando de desligamento.
 
-Cada modelo deve ser YOLOv8 em ONNX com saída sem NMS no formato `[1, 4 + número_de_classes, candidatos]`. Os nomes e a ordem de cada argumento `--*-classes` precisam corresponder exatamente às classes usadas no treinamento. Um modelo COCO genérico não reconhece automaticamente jaleco, óculos, calçados, cabelo preso, fumaça ou fogo: use modelos treinados para essas classes. Para exportar, em uma máquina de desenvolvimento com Ultralytics instalado:
+Cada modelo deve ser YOLOv8 em ONNX com saída sem NMS no formato `[1, 4 + número_de_classes, candidatos]`. Os nomes e a ordem de cada argumento `--*-classes` precisam corresponder exatamente às classes usadas no treinamento. Um modelo COCO genérico não reconhece automaticamente jaleco, calça, calçado fechado, cabelo comprido/preso, fumaça ou fogo: use modelos treinados para essas classes. Para exportar, em uma máquina de desenvolvimento com Ultralytics instalado:
 
 ```bash
 yolo export model=best.pt format=onnx imgsz=320

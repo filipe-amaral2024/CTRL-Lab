@@ -14,6 +14,14 @@ class DummyMQTT:
         self.messages.append({"topic": topic, "payload": payload, "qos": qos})
 
 
+class DummyGPIO:
+    def __init__(self):
+        self.buzzer_values = []
+
+    def set_buzzer(self, on):
+        self.buzzer_values.append(on)
+
+
 class AlertManagerTests(unittest.TestCase):
     def setUp(self):
         self.config = RaspberryConfig(use_mock_hardware=True)
@@ -85,6 +93,80 @@ class AlertManagerTests(unittest.TestCase):
         self.assertEqual(manager.update(pressed), SystemState.EMERGENCY)
         self.assertEqual(manager.update(released), SystemState.EMERGENCY)
         self.assertEqual(manager.update(reset), SystemState.NORMAL)
+
+    def test_reset_waits_for_a_fresh_safe_vision_result(self):
+        manager = AlertManager(self.config)
+        emergency = EnvironmentReading(
+            temperature_c=24.0,
+            humidity_pct=50.0,
+            gas_ppm=None,
+            smoke_detected=None,
+            emergency_button_pressed=True,
+        )
+        reset = EnvironmentReading(
+            temperature_c=24.0,
+            humidity_pct=50.0,
+            gas_ppm=None,
+            smoke_detected=None,
+            emergency_button_pressed=False,
+            reset_button_pressed=True,
+        )
+
+        self.assertEqual(manager.update(emergency), SystemState.EMERGENCY)
+        self.assertEqual(
+            manager.update(reset, vision_ready=False),
+            SystemState.EMERGENCY,
+        )
+        self.assertEqual(
+            manager.update(
+                reset,
+                vision_state=SystemState.NORMAL,
+                vision_ready=True,
+            ),
+            SystemState.NORMAL,
+        )
+
+    def test_reset_press_is_remembered_until_safe_vision_result_arrives(self):
+        manager = AlertManager(self.config)
+        emergency = EnvironmentReading(
+            temperature_c=24.0,
+            humidity_pct=50.0,
+            gas_ppm=None,
+            smoke_detected=None,
+            emergency_button_pressed=True,
+        )
+        reset_pressed = EnvironmentReading(
+            temperature_c=24.0,
+            humidity_pct=50.0,
+            gas_ppm=None,
+            smoke_detected=None,
+            emergency_button_pressed=False,
+            reset_button_pressed=True,
+        )
+        buttons_released = EnvironmentReading(
+            temperature_c=24.0,
+            humidity_pct=50.0,
+            gas_ppm=None,
+            smoke_detected=None,
+            emergency_button_pressed=False,
+            reset_button_pressed=False,
+        )
+
+        manager.update(emergency)
+        self.assertEqual(
+            manager.update(reset_pressed, vision_ready=False),
+            SystemState.EMERGENCY,
+        )
+        self.assertTrue(manager.reset_requested)
+        self.assertEqual(
+            manager.update(
+                buttons_released,
+                vision_state=SystemState.NORMAL,
+                vision_ready=True,
+            ),
+            SystemState.NORMAL,
+        )
+        self.assertFalse(manager.reset_requested)
 
     def test_reset_does_not_clear_active_critical_risk(self):
         manager = AlertManager(self.config)
@@ -208,6 +290,22 @@ class AlertManagerTests(unittest.TestCase):
         self.assertIsNone(payload["smoke_detected"])
         self.assertIsNone(payload["gas_detected"])
         self.assertIsNone(payload["emergency_button_pressed"])
+
+    def test_emergency_deactivates_all_actuator_outputs_without_led_control(self):
+        gpio = DummyGPIO()
+        manager = AlertManager(self.config, gpio_controller=gpio)
+        reading = EnvironmentReading(
+            temperature_c=None,
+            humidity_pct=None,
+            gas_ppm=None,
+            smoke_detected=None,
+            emergency_button_pressed=True,
+        )
+
+        manager.update(reading)
+
+        self.assertEqual(gpio.buzzer_values, [False])
+        self.assertFalse(hasattr(gpio, "set_led"))
 
 
 if __name__ == "__main__":

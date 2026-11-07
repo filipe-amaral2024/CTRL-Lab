@@ -15,7 +15,7 @@ Em desenvolvimento ativo.
 
 O runtime está pronto para receber dois modelos ONNX treinados/exportados com classes separadas (segurança e acesso). Os pesos ainda não estão incluídos; sem pesos compatíveis, não há inferência visual funcional. O dashboard já está implementado; sua validação com broker e Raspberry reais permanece pendente.
 
-No modo real, leituras indisponíveis de sensores são publicadas como `null`, em vez de serem substituídas por números aleatórios. O DHT22 requer dependência e ligação corretas. O MQ-2 possui leitura digital DO (limiar configurado no módulo, sem ppm). O botão de emergência tem trava mecânica; o reset separado só limpa EMERGENCY depois que o botão for destravado e não houver risco crítico ativo. Confirme tensão e polaridade do DO antes de conectá-lo ao GPIO.
+No modo real, leituras indisponíveis de sensores são publicadas como `null`, em vez de serem substituídas por números aleatórios. O DHT22 requer dependência e ligação corretas. O MQ-2 possui leitura digital DO (limiar configurado no módulo, sem ppm). O botão de emergência tem trava mecânica; com modelo de segurança configurado, o reset reativa a visão e só limpa EMERGENCY após uma inferência segura e a ausência de risco crítico. A solicitação de reset permanece pendente enquanto a verificação executa. Sem o modelo, o reset só pode revalidar sensores e botões; não há confirmação visual. Durante EMERGENCY, visão/câmera e saídas físicas são pausadas, mas sensores, botões, Raspberry Pi e MQTT/status permanecem ativos. Isso é uma parada de software, não uma parada de emergência elétrica/certificada. Confirme tensão e polaridade do DO antes de conectá-lo ao GPIO.
 
 ## Fases concluídas
 

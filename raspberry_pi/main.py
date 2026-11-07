@@ -64,7 +64,7 @@ def parse_args():
     )
     parser.add_argument(
         "--access-classes",
-        default="person,lab_coat,safety_glasses,closed_shoes,tied_hair",
+        default="person,lab_coat,trousers,closed_shoes,long_hair,tied_hair",
         help="Classes do modelo de acesso, separadas por vírgula e na ordem do modelo",
     )
     parser.add_argument("--inference-interval", type=float, default=3.0, help="Intervalo entre inferências em segundos")
@@ -240,7 +240,11 @@ def main():
     cycles = 0
     try:
         manager.startup()
-        if vision_service is not None:
+        reading = monitor.read()
+        if (
+            vision_service is not None
+            and manager.evaluate(reading) != SystemState.EMERGENCY
+        ):
             vision_service.start()
         if camera_stream_server is not None:
             camera_stream_server.start()
@@ -248,12 +252,45 @@ def main():
             keyboard_listener.start()
 
         while True:
-            reading = monitor.read()
-            vision_snapshot = vision_service.snapshot() if vision_service is not None else None
+            if cycles:
+                reading = monitor.read()
+            sensor_state = manager.evaluate(reading)
+            if (
+                vision_service is not None
+                and manager.emergency_latched
+                and (
+                    reading.reset_button_pressed is True
+                    or manager.reset_requested
+                )
+                and reading.emergency_button_pressed is not True
+                and sensor_state != SystemState.EMERGENCY
+                and not vision_service.running
+            ):
+                try:
+                    vision_service.start()
+                    logger.info(
+                        "Reset solicitado; visão reativada para confirmar condição segura."
+                    )
+                except RuntimeError:
+                    logger.exception(
+                        "Não foi possível reativar a visão; a emergência permanece travada."
+                    )
+
+            vision_snapshot = (
+                vision_service.snapshot() if vision_service is not None else None
+            )
+            vision_ready = (
+                vision_snapshot["safety_ready"] if vision_snapshot else True
+            )
             state = manager.update(
                 reading,
-                vision_state=vision_snapshot["state"] if vision_snapshot else None,
+                vision_state=(
+                    vision_snapshot["state"]
+                    if vision_snapshot and vision_ready
+                    else None
+                ),
                 vision_details=vision_snapshot["details"] if vision_snapshot else None,
+                vision_ready=vision_ready,
             )
             logger.info(
                 "Leitura -> temp=%sC umid=%s%% gas_ppm=%s gas_detected=%s "
@@ -266,6 +303,19 @@ def main():
                 reading.emergency_button_pressed,
                 state.value,
             )
+            if (
+                state == SystemState.EMERGENCY
+                and vision_service is not None
+                and vision_service.running
+                and (
+                    vision_ready
+                    or sensor_state == SystemState.EMERGENCY
+                )
+            ):
+                if vision_service.stop():
+                    logger.info(
+                        "Emergência: câmera/visão pausadas; Raspberry, botões e MQTT permanecem ativos."
+                    )
 
             cycles += 1
             if args.cycles > 0 and cycles >= args.cycles:

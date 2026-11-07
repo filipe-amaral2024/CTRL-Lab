@@ -41,7 +41,7 @@ class GPIOController:
         if self.gpio is None:
             return
 
-        for pin in self.config.pins.values():
+        for pin in self.config.output_pins:
             self.gpio.setup(pin, self.gpio.OUT, initial=self.gpio.LOW)
         for pin in self.config.input_pins.values():
             self.gpio.setup(
@@ -104,16 +104,8 @@ class GPIOController:
 
         self.gpio.output(pin, self.gpio.HIGH if value else self.gpio.LOW)
 
-    def set_led(self, name: str, on: bool):
-        if name not in self.config.pins:
-            raise ValueError(f"LED inválido: {name}")
-        self.set_output(self.config.pins[name], on)
-
     def set_buzzer(self, on: bool):
         self.set_output(self.config.buzzer_pin, on)
-
-    def set_siren(self, on: bool):
-        self.set_output(self.config.siren_pin, on)
 
     def cleanup(self):
         if self.gpio is None:
@@ -127,7 +119,7 @@ class GPIOController:
                 ):
                     self.gpio.remove_event_detect(pin)
                 self._button_event_registered = False
-            for pin in self.config.pins.values():
+            for pin in self.config.output_pins:
                 self.gpio.output(pin, self.gpio.LOW)
             self.gpio.cleanup()
         finally:
