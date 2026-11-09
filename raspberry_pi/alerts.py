@@ -22,6 +22,7 @@ class AlertManager:
         self.state = SystemState.NORMAL
         self._emergency_latched = False
         self._reset_requested = False
+        self._buzzer_on = None
 
     @property
     def emergency_latched(self):
@@ -63,7 +64,15 @@ class AlertManager:
 
         return SystemState.NORMAL
 
-    def update(self, reading, vision_state=None, vision_details=None, vision_ready=True):
+    def update(
+        self,
+        reading,
+        vision_state=None,
+        vision_details=None,
+        vision_ready=True,
+        publish_status=True,
+    ):
+        previous_state = self.state
         live_state = self.evaluate(reading)
         if vision_state is not None:
             priorities = {
@@ -102,14 +111,18 @@ class AlertManager:
 
         self.state = new_state
         self._apply_hardware(new_state)
-        self._publish_status(reading, new_state, vision_details)
+        if publish_status or new_state != previous_state:
+            self._publish_status(reading, new_state, vision_details)
         return new_state
 
     def _apply_hardware(self, state):
         if self.gpio is None:
             return
 
-        self.gpio.set_buzzer(state in (SystemState.WARNING, SystemState.ALERT))
+        buzzer_on = state in (SystemState.WARNING, SystemState.ALERT)
+        if buzzer_on != self._buzzer_on:
+            self.gpio.set_buzzer(buzzer_on)
+            self._buzzer_on = buzzer_on
 
     def _publish_status(self, reading, state, vision_details=None):
         if self.mqtt_client is None:
@@ -124,6 +137,7 @@ class AlertManager:
             "gas_detected": reading.gas_detected,
             "emergency_button_pressed": reading.emergency_button_pressed,
             "reset_button_pressed": reading.reset_button_pressed,
+            "dht_age_seconds": reading.dht_age_seconds,
         }
         if vision_details is not None:
             payload["vision"] = vision_details

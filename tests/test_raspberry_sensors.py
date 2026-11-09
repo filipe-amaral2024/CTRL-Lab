@@ -50,6 +50,83 @@ class EnvironmentMonitorTests(unittest.TestCase):
         self.assertIsNone(reading.smoke_detected)
         self.assertIsNone(reading.gas_detected)
 
+    def test_dht_is_not_read_more_frequently_than_every_two_seconds(self):
+        class FakeDHT:
+            def __init__(self):
+                self.read_count = 0
+
+            @property
+            def temperature(self):
+                self.read_count += 1
+                return 23.5
+
+            @property
+            def humidity(self):
+                return 48.0
+
+        fake_device = FakeDHT()
+        clock = [0.0]
+        with (
+            patch("raspberry_pi.sensors.board", SimpleNamespace(D17=object())),
+            patch("raspberry_pi.sensors.adafruit_dht") as dht_module,
+        ):
+            dht_module.DHT22.return_value = fake_device
+            monitor = EnvironmentMonitor(
+                RaspberryConfig(use_mock_hardware=False, read_interval_seconds=0.1)
+            )
+
+        with patch("raspberry_pi.sensors.time.monotonic", side_effect=lambda: clock[0]):
+            first = monitor.read()
+            clock[0] = 0.5
+            second = monitor.read()
+            clock[0] = 2.0
+            third = monitor.read()
+
+        self.assertEqual(first.temperature_c, 23.5)
+        self.assertEqual(second.temperature_c, 23.5)
+        self.assertEqual(third.temperature_c, 23.5)
+        self.assertEqual(fake_device.read_count, 2)
+        self.assertEqual(first.dht_age_seconds, 0.0)
+        self.assertEqual(second.dht_age_seconds, 0.5)
+        self.assertEqual(third.dht_age_seconds, 0.0)
+
+    def test_failed_dht_read_keeps_then_expires_last_good_value(self):
+        class FakeDHT:
+            def __init__(self):
+                self.fail = False
+
+            @property
+            def temperature(self):
+                if self.fail:
+                    raise RuntimeError("sensor read failed")
+                return 23.5
+
+            @property
+            def humidity(self):
+                return 48.0
+
+        device = FakeDHT()
+        clock = [0.0]
+        with (
+            patch("raspberry_pi.sensors.board", SimpleNamespace(D17=object())),
+            patch("raspberry_pi.sensors.adafruit_dht") as dht_module,
+        ):
+            dht_module.DHT22.return_value = device
+            monitor = EnvironmentMonitor(RaspberryConfig(use_mock_hardware=False))
+
+        with patch("raspberry_pi.sensors.time.monotonic", side_effect=lambda: clock[0]):
+            fresh = monitor.read()
+            device.fail = True
+            clock[0] = 2.0
+            stale_but_retained = monitor.read()
+            clock[0] = 6.1
+            expired = monitor.read()
+
+        self.assertEqual(fresh.temperature_c, 23.5)
+        self.assertEqual(stale_but_retained.temperature_c, 23.5)
+        self.assertIsNone(expired.temperature_c)
+        self.assertGreater(expired.dht_age_seconds, 5.0)
+
     def test_close_releases_dht_device(self):
         fake_device = SimpleNamespace(temperature=22.0, humidity=45.0, exit=lambda: None)
         fake_device.exit = unittest.mock.Mock()

@@ -238,6 +238,29 @@ class AlertManagerTests(unittest.TestCase):
         self.assertEqual(payload["state"], "ALERT")
         self.assertEqual(payload["temperature_c"], 31.0)
 
+    def test_status_publication_is_throttled_but_state_transitions_publish(self):
+        mqtt = DummyMQTT()
+        manager = AlertManager(self.config, mqtt_client=mqtt)
+        safe = EnvironmentReading(
+            temperature_c=24.0,
+            humidity_pct=50.0,
+            gas_ppm=None,
+            smoke_detected=None,
+        )
+        hot = EnvironmentReading(
+            temperature_c=31.0,
+            humidity_pct=50.0,
+            gas_ppm=None,
+            smoke_detected=None,
+        )
+
+        manager.update(safe, publish_status=True)
+        manager.update(safe, publish_status=False)
+        manager.update(hot, publish_status=False)
+
+        self.assertEqual(len(mqtt.messages), 2)
+        self.assertEqual(json.loads(mqtt.messages[-1]["payload"])["state"], "ALERT")
+
     def test_visual_emergency_overrides_normal_sensor_state(self):
         reading = EnvironmentReading(
             temperature_c=24.0,

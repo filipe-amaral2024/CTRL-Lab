@@ -1,4 +1,3 @@
-import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -26,7 +25,7 @@ class FakeCamera:
 
 
 class RaspberryCameraPreviewTests(unittest.TestCase):
-    def test_preview_captures_frames_without_a_detector_and_can_restart(self):
+    def test_preview_captures_synchronously_at_the_configured_rate(self):
         camera = FakeCamera()
         cv2 = SimpleNamespace(
             imencode=lambda extension, frame: (
@@ -35,29 +34,42 @@ class RaspberryCameraPreviewTests(unittest.TestCase):
             )
         )
         preview = RaspberryCameraPreview(camera, preview_interval_seconds=0.01)
+        clock = [1.0]
 
-        with patch("raspberry_pi.camera_preview.cv2", cv2):
+        with (
+            patch("raspberry_pi.camera_preview.cv2", cv2),
+            patch("raspberry_pi.camera_preview.time.monotonic", side_effect=lambda: clock[0]),
+        ):
             preview.start()
-            deadline = time.monotonic() + 2
-            while preview.latest_preview() is None and time.monotonic() < deadline:
-                time.sleep(0.01)
-
+            self.assertTrue(preview.capture_if_due())
             first = preview.latest_preview()
             self.assertIsNotNone(first)
             self.assertEqual(first[1], b"jpeg-frame")
+            clock[0] = 1.005
+            self.assertFalse(preview.capture_if_due())
+            self.assertEqual(camera.read_count, 1)
+            clock[0] = 1.01
+            self.assertTrue(preview.capture_if_due())
+            self.assertEqual(camera.read_count, 2)
             self.assertTrue(preview.stop())
             self.assertFalse(camera.opened)
             self.assertIsNone(preview.latest_preview())
 
             camera.closed = False
             preview.start()
-            deadline = time.monotonic() + 2
-            while preview.latest_preview() is None and time.monotonic() < deadline:
-                time.sleep(0.01)
-            self.assertIsNotNone(preview.latest_preview())
+            clock[0] = 2.0
+            self.assertTrue(preview.capture_if_due())
             self.assertTrue(preview.stop())
 
-        self.assertGreater(camera.read_count, 1)
+        self.assertEqual(camera.read_count, 3)
+
+    def test_capture_requires_started_preview(self):
+        camera = FakeCamera()
+        preview = RaspberryCameraPreview(camera)
+
+        with patch("raspberry_pi.camera_preview.cv2", SimpleNamespace()):
+            with self.assertRaisesRegex(RuntimeError, "not running"):
+                preview.capture_if_due()
 
     def test_start_rejects_camera_that_cannot_open(self):
         camera = FakeCamera()

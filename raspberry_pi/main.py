@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from raspberry_pi.alerts import AlertManager
+from raspberry_pi.alerts import AlertManager, SystemState
 from raspberry_pi.camera_preview import RaspberryCameraPreview
 from raspberry_pi.camera_stream import CameraStreamServer
 from raspberry_pi.config import RaspberryConfig
@@ -32,8 +32,30 @@ def parse_args():
         help="Força leituras simuladas e saídas GPIO sem hardware",
     )
     parser.add_argument("--broker", default="localhost", help="Endereço do broker MQTT")
-    parser.add_argument("--interval", type=float, default=2.0, help="Intervalo entre leituras em segundos")
-    parser.add_argument("--cycles", type=int, default=0, help="Número de ciclos antes encerrar. 0 = loop infinito")
+    parser.add_argument(
+        "--interval",
+        type=float,
+        default=2.0,
+        help="Intervalo mínimo entre leituras do DHT22 em segundos (mínimo efetivo: 2)",
+    )
+    parser.add_argument(
+        "--cycles",
+        type=int,
+        default=0,
+        help="Número de atualizações de status antes encerrar. 0 = loop infinito",
+    )
+    parser.add_argument(
+        "--loop-hz",
+        type=float,
+        default=48.0,
+        help="Frequência do loop cooperativo de GPIO e controle",
+    )
+    parser.add_argument(
+        "--status-interval",
+        type=float,
+        default=1.0,
+        help="Intervalo de log e status MQTT em segundos",
+    )
     parser.add_argument(
         "--mq2-active-high",
         action="store_true",
@@ -154,6 +176,10 @@ def main():
         raise SystemExit("--image-size deve ser maior que zero.")
     if args.interval <= 0:
         raise SystemExit("--interval deve ser maior que zero.")
+    if args.loop_hz <= 0:
+        raise SystemExit("--loop-hz deve ser maior que zero.")
+    if args.status_interval <= 0:
+        raise SystemExit("--status-interval deve ser maior que zero.")
     if not 0 < args.camera_stream_port < 65536:
         raise SystemExit("--camera-stream-port deve estar entre 1 e 65535.")
     if args.camera_stream_token is not None and len(args.camera_stream_token) < 16:
@@ -181,8 +207,16 @@ def main():
     if args.safety_model or args.camera_stream_token:
         from app.cameras.entry_camera import CameraConfig, StreamCamera
 
+        camera_config = CameraConfig(name="ps3_eye", width=640, height=480)
+        if args.camera_stream_token and not args.safety_model:
+            camera_config = CameraConfig(
+                name="ps3_eye",
+                width=320,
+                height=240,
+                fps=2,
+            )
         camera = StreamCamera(
-            CameraConfig(name="ps3_eye", width=640, height=480),
+            camera_config,
             fallback_device=args.camera_device,
         )
 
@@ -211,7 +245,10 @@ def main():
             preview_enabled=bool(args.camera_stream_token),
         )
     elif args.camera_stream_token:
-        camera_preview = RaspberryCameraPreview(camera)
+        camera_preview = RaspberryCameraPreview(
+            camera,
+            preview_interval_seconds=0.5,
+        )
 
     camera_stream_server = None
     if args.camera_stream_token:
@@ -247,7 +284,7 @@ def main():
         else None
     )
 
-    cycles = 0
+    status_cycles = 0
     try:
         manager.startup()
         reading = monitor.read()
@@ -266,9 +303,13 @@ def main():
         if keyboard_listener is not None:
             keyboard_listener.start()
 
+        tick_interval = 1.0 / args.loop_hz
+        next_tick_at = time.monotonic()
+        next_status_at = next_tick_at
+        last_logged_state = None
         while True:
-            if cycles:
-                reading = monitor.read()
+            now = time.monotonic()
+            reading = monitor.read()
             sensor_state = manager.evaluate(reading)
             if (
                 vision_service is not None
@@ -297,6 +338,7 @@ def main():
             vision_ready = (
                 vision_snapshot["safety_ready"] if vision_snapshot else True
             )
+            status_due = now >= next_status_at
             state = manager.update(
                 reading,
                 vision_state=(
@@ -306,18 +348,27 @@ def main():
                 ),
                 vision_details=vision_snapshot["details"] if vision_snapshot else None,
                 vision_ready=vision_ready,
+                publish_status=status_due,
             )
-            logger.info(
-                "Leitura -> temp=%sC umid=%s%% gas_ppm=%s gas_detected=%s "
-                "smoke=%s emergency_button=%s => %s",
-                reading.temperature_c,
-                reading.humidity_pct,
-                reading.gas_ppm,
-                reading.gas_detected,
-                reading.smoke_detected,
-                reading.emergency_button_pressed,
-                state.value,
-            )
+            if status_due or state != last_logged_state:
+                logger.info(
+                    "Leitura -> temp=%sC umid=%s%% dht_age=%ss gas_ppm=%s "
+                    "gas_detected=%s smoke=%s emergency_button=%s => %s",
+                    reading.temperature_c,
+                    reading.humidity_pct,
+                    reading.dht_age_seconds,
+                    reading.gas_ppm,
+                    reading.gas_detected,
+                    reading.smoke_detected,
+                    reading.emergency_button_pressed,
+                    state.value,
+                )
+                last_logged_state = state
+            if status_due:
+                status_cycles += 1
+                while next_status_at <= now:
+                    next_status_at += args.status_interval
+
             if (
                 state == SystemState.EMERGENCY
                 and vision_service is not None
@@ -339,12 +390,18 @@ def main():
                         )
                 elif state != SystemState.EMERGENCY and not camera_preview.running:
                     camera_preview.start()
+                if state != SystemState.EMERGENCY:
+                    camera_preview.capture_if_due()
 
-            cycles += 1
-            if args.cycles > 0 and cycles >= args.cycles:
+            if args.cycles > 0 and status_cycles >= args.cycles:
                 break
 
-            time.sleep(config.read_interval_seconds)
+            next_tick_at += tick_interval
+            sleep_seconds = next_tick_at - time.monotonic()
+            if sleep_seconds > 0:
+                time.sleep(sleep_seconds)
+            else:
+                next_tick_at = time.monotonic()
     finally:
         if keyboard_listener is not None:
             keyboard_listener.stop()
