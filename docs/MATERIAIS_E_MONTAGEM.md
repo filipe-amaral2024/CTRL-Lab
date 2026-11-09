@@ -147,6 +147,8 @@ Raspberry Pi:
 
 Conecte a PS3 Eye ao Pi e confirme o índice de dispositivo (padrão `0`). Copie os modelos ONNX para o Pi. Instale apenas as dependências Python de [requirements.txt](../requirements.txt); não é necessário instalar Ultralytics nem PyTorch para inferência. Ultralytics pode ser usado em outro computador apenas para exportar os modelos YOLOv8 em ONNX com `imgsz=320`.
 
+Para validar a pré-visualização da câmera no dashboard sem modelo de IA, configure `CTRL_LAB_CAMERA_TOKEN` com um segredo de pelo menos 16 caracteres e execute `python -m raspberry_pi.main --broker localhost --camera-device 0 --camera-stream-token "$CTRL_LAB_CAMERA_TOKEN" --camera-stream-host 127.0.0.1`. Esse modo transmite a imagem, mas não detecta fumaça/fogo. O stream para durante EMERGENCY e retorna após o reset. Com o servidor vinculado a `127.0.0.1`, use no PC um túnel SSH adicional para a porta `8081`; configure o dashboard com o mesmo token e URL `http://127.0.0.1:8081/video.mjpg`.
+
 Exemplo:
 
 ```bash

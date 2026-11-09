@@ -11,6 +11,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from raspberry_pi.alerts import AlertManager
+from raspberry_pi.camera_preview import RaspberryCameraPreview
 from raspberry_pi.camera_stream import CameraStreamServer
 from raspberry_pi.config import RaspberryConfig
 from raspberry_pi.hardware import GPIOController
@@ -157,9 +158,6 @@ def main():
         raise SystemExit("--camera-stream-port deve estar entre 1 e 65535.")
     if args.camera_stream_token is not None and len(args.camera_stream_token) < 16:
         raise SystemExit("O token da câmera deve ter pelo menos 16 caracteres.")
-    if args.camera_stream_token and not args.safety_model:
-        raise SystemExit("--camera-stream-token exige --safety-model para ativar a câmera.")
-
     if args.camera_test:
         from app.cameras.entry_camera import CameraConfig, StreamCamera
 
@@ -178,14 +176,19 @@ def main():
     )
 
     vision_service = None
-    if args.safety_model:
+    camera_preview = None
+    camera = None
+    if args.safety_model or args.camera_stream_token:
         from app.cameras.entry_camera import CameraConfig, StreamCamera
-        from app.vision.yolo_onnx import OpenCVDNNYOLODetector
 
         camera = StreamCamera(
             CameraConfig(name="ps3_eye", width=640, height=480),
             fallback_device=args.camera_device,
         )
+
+    if args.safety_model:
+        from app.vision.yolo_onnx import OpenCVDNNYOLODetector
+
         safety_detector = OpenCVDNNYOLODetector(
             args.safety_model,
             class_names=_parse_classes(args.safety_classes),
@@ -207,11 +210,18 @@ def main():
             inference_interval_seconds=args.inference_interval,
             preview_enabled=bool(args.camera_stream_token),
         )
+    elif args.camera_stream_token:
+        camera_preview = RaspberryCameraPreview(camera)
 
     camera_stream_server = None
-    if vision_service is not None and args.camera_stream_token:
+    if args.camera_stream_token:
+        preview_provider = (
+            vision_service.latest_preview
+            if vision_service is not None
+            else camera_preview.latest_preview
+        )
         camera_stream_server = CameraStreamServer(
-            vision_service.latest_preview,
+            preview_provider,
             token=args.camera_stream_token,
             host=args.camera_stream_host,
             port=args.camera_stream_port,
@@ -246,6 +256,11 @@ def main():
             and manager.evaluate(reading) != SystemState.EMERGENCY
         ):
             vision_service.start()
+        if (
+            camera_preview is not None
+            and manager.evaluate(reading) != SystemState.EMERGENCY
+        ):
+            camera_preview.start()
         if camera_stream_server is not None:
             camera_stream_server.start()
         if keyboard_listener is not None:
@@ -316,6 +331,14 @@ def main():
                     logger.info(
                         "Emergência: câmera/visão pausadas; Raspberry, botões e MQTT permanecem ativos."
                     )
+            if camera_preview is not None:
+                if state == SystemState.EMERGENCY and camera_preview.running:
+                    if camera_preview.stop():
+                        logger.info(
+                            "Emergência: pré-visualização pausada; Raspberry, botões e MQTT permanecem ativos."
+                        )
+                elif state != SystemState.EMERGENCY and not camera_preview.running:
+                    camera_preview.start()
 
             cycles += 1
             if args.cycles > 0 and cycles >= args.cycles:
@@ -329,6 +352,8 @@ def main():
             camera_stream_server.stop()
         if vision_service is not None:
             vision_service.stop()
+        if camera_preview is not None:
+            camera_preview.stop()
         try:
             monitor.close()
         finally:

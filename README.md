@@ -469,7 +469,7 @@ python -m raspberry_pi.main --camera-test --camera-device 0 --camera-test-frames
 
 O comando informa quantos frames foram capturados, FPS e resolução, e encerra sem iniciar GPIO/MQTT. Para testar o broker instalado no Pi, inicie o serviço (`sudo systemctl enable --now mosquitto`) e valide localmente com `mosquitto_pub`/`mosquitto_sub`; acesso do dashboard pela rede exige configuração adicional do broker e não deve ser aberto sem autenticação.
 
-Use o mesmo segredo de pelo menos 16 caracteres no Raspberry e no computador do dashboard para proteger o stream. Exemplo de execução no Pi com os dois modelos. O modelo de acesso começa desabilitado; pressione `A` no terminal para alterná-lo.
+Use um segredo de pelo menos 16 caracteres para proteger o stream. Para apenas visualizar a câmera sem IA, inicie o runtime no Pi com `--camera-stream-token` e sem `--safety-model`; a câmera transmite vídeo mas não analisa fumaça/fogo. Para inferência, forneça também `--safety-model`. Durante uma emergência, a pré-visualização para e recomeça após o reset. Exemplo com os modelos configurados; o modelo de acesso começa desabilitado e pode ser alternado com `A`:
 
 ```bash
 export CTRL_LAB_CAMERA_TOKEN="use-o-mesmo-token-configurado-no-dashboard"
@@ -482,6 +482,25 @@ python3 -m raspberry_pi.main \
   --access-classes person,lab_coat,trousers,closed_shoes,long_hair,tied_hair \
   --image-size 320 \
   --inference-interval 3
+```
+
+Para pré-visualização sem inferência, use:
+
+```bash
+export CTRL_LAB_CAMERA_TOKEN="use-um-segredo-com-16-caracteres-ou-mais"
+python3 -m raspberry_pi.main --broker localhost --camera-device 0 --camera-stream-token "$CTRL_LAB_CAMERA_TOKEN" --camera-stream-host 127.0.0.1
+```
+
+No PC, mantenha um segundo túnel SSH ativo para o vídeo:
+
+```powershell
+ssh -N -L 8081:127.0.0.1:8081 <usuario>@<IP_DO_RASPBERRY>
+```
+
+Inicie o dashboard com o mesmo token:
+
+```powershell
+python -m central.dashboard --host 127.0.0.1 --port 8000 --broker 127.0.0.1 --mqtt-port 1884 --control-token "<TOKEN_DO_DASHBOARD>" --camera-stream-token "<TOKEN_DA_CAMERA>" --camera-stream-url http://127.0.0.1:8081/video.mjpg
 ```
 
 O serviço pode ser executado apenas com segurança, omitindo `--access-model`. Para controle do dashboard, use `CentralMQTTListener.set_access_model_enabled(True)` (ou publique o payload diretamente no tópico `ctrlab/central/commands`):
@@ -500,7 +519,7 @@ yolo export model=best.pt format=onnx imgsz=320
 
 O Pi não precisa instalar PyTorch ou Ultralytics para executar o modelo. Estados e detecções são publicados no tópico `ctrlab/raspberry/status`; o dashboard os consome para apresentar a telemetria e o histórico sem executar inferência.
 
-Com `CTRL_LAB_CAMERA_TOKEN` configurado, o Raspberry disponibiliza o stream MJPEG protegido em `http://<IP_DO_RASPBERRY>:8081/video.mjpg`. O dashboard usa por padrão o host informado em `--broker` para conectar ao stream; ajuste com `--camera-stream-url` se o endereço da câmera for diferente. Libere a porta TCP `8081` entre o computador do dashboard e o Raspberry. Sem o token, a pré-visualização não é iniciada.
+Com `CTRL_LAB_CAMERA_TOKEN` configurado, o Raspberry disponibiliza o stream MJPEG protegido em `http://<IP_DO_RASPBERRY>:8081/video.mjpg`. No uso por túnel SSH, mantenha o servidor vinculado a `127.0.0.1` no Pi e crie também o encaminhamento local da porta 8081 (`ssh -N -L 8081:127.0.0.1:8081 <usuario>@<IP_DO_RASPBERRY>`). Inicie o dashboard com o mesmo token em `--camera-stream-token` e `--camera-stream-url http://127.0.0.1:8081/video.mjpg`. Sem o token, a pré-visualização não é iniciada.
 
 ---
 
