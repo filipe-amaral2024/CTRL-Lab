@@ -35,8 +35,8 @@ def parse_args():
     parser.add_argument(
         "--interval",
         type=float,
-        default=2.0,
-        help="Intervalo mínimo entre leituras do DHT22 em segundos (mínimo efetivo: 2)",
+        default=5.0,
+        help="Intervalo entre leituras do DHT22 em segundos (padrão: 5; mínimo efetivo: 2)",
     )
     parser.add_argument(
         "--cycles",
@@ -206,14 +206,20 @@ def main():
     camera = None
     if args.safety_model or args.camera_stream_token:
         from app.cameras.entry_camera import CameraConfig, StreamCamera
+        from raspberry_pi.camera_preview import PREVIEW_FPS
 
-        camera_config = CameraConfig(name="ps3_eye", width=640, height=480)
+        camera_config = CameraConfig(
+            name="ps3_eye",
+            width=640,
+            height=480,
+            fps=PREVIEW_FPS,
+        )
         if args.camera_stream_token and not args.safety_model:
             camera_config = CameraConfig(
                 name="ps3_eye",
-                width=320,
-                height=240,
-                fps=2,
+                width=640,
+                height=480,
+                fps=PREVIEW_FPS,
             )
         camera = StreamCamera(
             camera_config,
@@ -247,7 +253,6 @@ def main():
     elif args.camera_stream_token:
         camera_preview = RaspberryCameraPreview(
             camera,
-            preview_interval_seconds=0.5,
         )
 
     camera_stream_server = None

@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from raspberry_pi.camera_preview import RaspberryCameraPreview
+from raspberry_pi.camera_preview import PREVIEW_FPS, RaspberryCameraPreview
 
 
 class FakeCamera:
@@ -25,6 +25,15 @@ class FakeCamera:
 
 
 class RaspberryCameraPreviewTests(unittest.TestCase):
+    def test_default_preview_interval_targets_24_fps(self):
+        preview = RaspberryCameraPreview(FakeCamera())
+
+        self.assertAlmostEqual(
+            preview.preview_interval_seconds,
+            1 / 24,
+        )
+        self.assertEqual(PREVIEW_FPS, 24)
+
     def test_preview_captures_synchronously_at_the_configured_rate(self):
         camera = FakeCamera()
         cv2 = SimpleNamespace(

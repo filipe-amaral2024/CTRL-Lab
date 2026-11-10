@@ -2,13 +2,11 @@
 
 ## 1. Visão geral
 
-O **CRTL-Lab** é um sistema de controle de acesso e monitoramento de segurança para laboratórios, desenvolvido como projeto acadêmico para a feira de Computação.
+O **CTRL-Lab** é um protótipo acadêmico de controle de acesso e monitoramento de segurança para laboratórios, desenvolvido para a feira de Computação.
 
 A proposta combina **visão computacional, inteligência artificial, sensores ambientais e automação** para auxiliar na prevenção e identificação de situações de risco em um laboratório.
 
-O sistema utiliza uma única câmera **PS3 Eye** conectada por USB ao **Raspberry Pi 3B+**. A câmera fornece frames compartilhados para dois modelos de visão: o modelo de segurança permanece ativo e o modelo de acesso pode ser ligado/desligado durante a execução.
-
-Os modelos são executados diretamente pelo Raspberry Pi. A captura não depende de stream IP de celular, evitando a latência e os travamentos observados. O computador recebe estado e eventos via MQTT; o dashboard web permite acompanhar sensores, riscos e histórico e controlar remotamente o modelo de acesso pela rede local.
+O desenho previsto usa uma câmera **PS3 Eye** conectada por USB ao Raspberry Pi, sensores ambientais e inferência local. O código contém a infraestrutura para esses módulos, mas o modo iniciado por `start-ctrlab.ps1` atualmente é **pré-visualização sem IA**: transmite a câmera, sem detectar fogo, fumaça ou EPI. A inferência exige arquivos ONNX compatíveis, que não estão incluídos no repositório, e a integração física ainda precisa ser validada no Pi. Consulte [Funcionamento atual](docs/FUNCIONAMENTO_ATUAL.md) para distinguir o comportamento implementado do objetivo do projeto, e [Pendências para concluir](docs/PENDENCIAS_CONCLUSAO.md) para o checklist de demonstração.
 
 ---
 
@@ -417,6 +415,8 @@ Conecte a PS3 Eye ao Raspberry Pi e confirme o índice de dispositivo (padrão `
 
 #### Preparar o Raspberry Pi OS Lite 64-bit
 
+Para fazer a sincronização do código, instalação das dependências e inicialização automática do runtime com dashboard no Windows, use o [script de início automatizado](./start-ctrlab.ps1) conforme o [guia passo a passo](./docs/GUIA_EXECUCAO.md#início-automatizado-no-windows). O modo padrão é pré-visualização sem IA; modelos ONNX não são instalados pelo script.
+
 Confirme que o sistema é 64-bit e registre a versão do Python antes de instalar dependências:
 
 ```bash
@@ -469,7 +469,7 @@ python -m raspberry_pi.main --camera-test --camera-device 0 --camera-test-frames
 
 O comando informa quantos frames foram capturados, FPS e resolução, e encerra sem iniciar GPIO/MQTT. Para testar o broker instalado no Pi, inicie o serviço (`sudo systemctl enable --now mosquitto`) e valide localmente com `mosquitto_pub`/`mosquitto_sub`; acesso do dashboard pela rede exige configuração adicional do broker e não deve ser aberto sem autenticação.
 
-Use um segredo de pelo menos 16 caracteres para proteger o stream. Para apenas visualizar a câmera sem IA, inicie o runtime no Pi com `--camera-stream-token` e sem `--safety-model`; a câmera transmite vídeo mas não analisa fumaça/fogo. Esse modo solicita 320x240 a 2 FPS e captura/codifica de forma síncrona no loop cooperativo, evitando uma thread de captura concorrente com os sensores. O loop de controle roda a 48 Hz, o DHT22 é consultado no máximo a cada 2 s (respeitando o intervalo mínimo do sensor) e o log/status MQTT é atualizado a cada segundo. O último valor válido do DHT22 é mantido por até 5 s; depois disso, temperatura e umidade aparecem como indisponíveis, com a idade da leitura no campo `dht_age_seconds`. Isso reduz contenção intencional de CPU, mas não garante temporização de tempo real nem elimina possíveis problemas elétricos, de USB ou do sistema operacional. Para inferência, forneça também `--safety-model`; esse modo usa o serviço de visão existente e não compartilha o escalonamento cooperativo da pré-visualização sem IA. Durante uma emergência, a pré-visualização para e recomeça após o reset. Exemplo com os modelos configurados; o modelo de acesso começa desabilitado e pode ser alternado com `A`:
+Use um segredo de pelo menos 16 caracteres para proteger o stream. Para apenas visualizar a câmera sem IA, inicie o runtime no Pi com `--camera-stream-token` e sem `--safety-model`; a câmera transmite vídeo mas não analisa fumaça/fogo. Esse modo solicita 640x480 a até 24 FPS e captura/codifica de forma síncrona no loop cooperativo, evitando uma thread de captura concorrente com os sensores. O loop de controle roda a 48 Hz; o DHT22 é consultado a cada 5 s por padrão (mínimo efetivo: 2 s) e o log/status MQTT é atualizado a cada segundo. A última leitura válida do DHT22 é mantida por até 12 s; depois disso, temperatura e umidade aparecem como indisponíveis, com a idade da leitura no campo `dht_age_seconds`. MQ-2 e botões continuam sendo verificados a 48 Hz. O intervalo maior reduz as leituras do DHT22, mas não reduz diretamente o trabalho da câmera. Isso não garante temporização de tempo real nem elimina possíveis problemas elétricos, de USB ou do sistema operacional. Para inferência, forneça também `--safety-model`; esse modo usa o serviço de visão existente e não compartilha o escalonamento cooperativo da pré-visualização sem IA. Durante uma emergência, a pré-visualização para e recomeça após o reset. Exemplo com os modelos configurados; o modelo de acesso começa desabilitado e pode ser alternado com `A`:
 
 ```bash
 export CTRL_LAB_CAMERA_TOKEN="use-o-mesmo-token-configurado-no-dashboard"

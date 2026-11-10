@@ -28,8 +28,8 @@ class RaspberryConfig:
     max_gas_ppm: float = 0.7
     smoke_threshold: float = 0.8
 
-    # Cadência máxima das leituras ambientais lentas, como o DHT22
-    read_interval_seconds: float = 2.0
+    # Intervalo entre leituras ambientais lentas, como o DHT22
+    read_interval_seconds: float = 5.0
 
     @property
     def output_pins(self):

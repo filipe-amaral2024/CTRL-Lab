@@ -1,39 +1,38 @@
 # Status do projeto CTRL-Lab
 
-## Status geral
+## Resumo
 
-Em desenvolvimento ativo.
+O CTRL-Lab tem uma base de software implementada para runtime no Raspberry Pi, sensores/GPIO, MQTT, dashboard, histórico SQLite, stream MJPEG e inferência OpenCV DNN para ONNX.
 
-## Situação atual
+**O fluxo iniciado atualmente por `start-ctrlab.ps1` é de pré-visualização sem IA.** Ele transmite a PS3 Eye USB, mas não detecta fogo, fumaça ou EPI. A inferência só é executada quando um modelo ONNX é fornecido por argumento; os pesos não estão presentes no repositório. A conclusão funcional depende de testes no Pi real, modelos validados e comprovação do circuito.
 
-- Raspberry Pi: runtime de sensores/alertas e inferência local OpenCV DNN para YOLOv8 ONNX implementados; validação física pendente
-- Sistema central: persistência e eventos iniciais implementados
-- Câmera: runtime preparado para uma única PS3 Eye USB compartilhada pelos modelos
-- Visão computacional: segurança executa continuamente; acesso/EPI pode ser alternado por atalho `A` ou por comando MQTT
-- Dashboard: painel web acessível por IP, com estado, sensores, eventos, controle remoto e pré-visualização da câmera protegida por token
-- Testes: automatizados cobrindo módulos principais
+## Implementado no código
 
-O runtime está pronto para receber dois modelos ONNX treinados/exportados com classes separadas (segurança e acesso). Os pesos ainda não estão incluídos; sem pesos compatíveis, não há inferência visual funcional. O dashboard já está implementado; sua validação com broker e Raspberry reais permanece pendente.
+- Runtime Raspberry com leitura de DHT22, leitura digital do comparador DO do MQ-2, botões de emergência/reset e buzzer.
+- Máquina de estados `NORMAL`, `WARNING`, `ALERT` e `EMERGENCY`.
+- Captura OpenCV de câmera USB e pré-visualização MJPEG protegida por token.
+- Infraestrutura opcional para detectores YOLOv8 ONNX via OpenCV DNN/CPU; modelo de acesso pode ser controlado por MQTT e pela tecla `A` quando configurado.
+- Comunicação MQTT entre Pi e central, dashboard web e armazenamento SQLite.
+- Inicializador PowerShell que instala/verifica dependências, sincroniza o código, prepara o runtime, estabelece túneis e abre o dashboard.
+- Suíte automatizada local; última execução completa reportada: 83 testes aprovados.
 
-No modo real, leituras indisponíveis de sensores são publicadas como `null`, em vez de serem substituídas por números aleatórios. O DHT22 requer dependência e ligação corretas. O MQ-2 possui leitura digital DO (limiar configurado no módulo, sem ppm). O botão de emergência tem trava mecânica; com modelo de segurança configurado, o reset reativa a visão e só limpa EMERGENCY após uma inferência segura e a ausência de risco crítico. A solicitação de reset permanece pendente enquanto a verificação executa. Sem o modelo, o reset só pode revalidar sensores e botões; não há confirmação visual. Durante EMERGENCY, visão/câmera e saídas físicas são pausadas, mas sensores, botões, Raspberry Pi e MQTT/status permanecem ativos. Isso é uma parada de software, não uma parada de emergência elétrica/certificada. Confirme tensão e polaridade do DO antes de conectá-lo ao GPIO.
+## Ainda não comprovado/concluído
 
-## Fases concluídas
+- Modelos ONNX treinados, compatíveis e avaliados; nenhum peso foi encontrado no repositório.
+- Conexão e deploy de ponta a ponta no Raspberry atualizado. O último erro reportado foi timeout SSH no endereço padrão `192.168.15.75`; confirmar o IP/rede atual.
+- Estabilidade da câmera e medição de FPS/resolução efetivos no runtime completo.
+- Leitura física correta de sensores e atuadores, GPIO real sem fallback para mock e validação elétrica.
+- Precisão, latência e carga de CPU/memória dos modelos no Raspberry.
+- Validação real de MQTT, dashboard, comandos e histórico durante uma sessão completa.
+- Ajuste do armazenamento para separar telemetria periódica de eventos significativos.
+- Ensaio e critérios de aceite para a apresentação.
 
-- Fase 0: organização inicial do projeto
-- Fase 1: captura local de câmera preparada
-- Fase 2: frame compartilhado e dois estados de execução dos modelos implementados
-- Fase 3: inferência YOLOv8 ONNX no Raspberry com OpenCV DNN
-- Integração de decisões visuais com sensores, atuadores e status MQTT
+## Documentação de referência
 
-## Fases pendentes
+- [Funcionamento atual](./FUNCIONAMENTO_ATUAL.md)
+- [Pendências para concluir](./PENDENCIAS_CONCLUSAO.md)
+- [Guia passo a passo](./GUIA_EXECUCAO.md)
+- [Materiais e montagem](./MATERIAIS_E_MONTAGEM.md)
+- [Plano de desenvolvimento original](../PLANO_DESENVOLVIMENTO.md)
 
-- Modelo ONNX próprio para classes de EPI, fumaça e fogo
-- Comunicação e instalação de broker MQTT no Raspberry
-- Validação do dashboard e dos comandos com broker e Raspberry reais
-- Testes físicos da PS3 Eye e medição de desempenho no Raspberry
-- Testes com Raspberry e câmera real
-- Testes finais e apresentação
-
-## Observação
-
-O projeto continua seguindo a sequência planejada em [PLANO_DESENVOLVIMENTO.md](../PLANO_DESENVOLVIMENTO.md), com arquitetura modular e preparação para expansão das funcionalidades.
+> O projeto é um protótipo acadêmico e não substitui sistemas ou dispositivos certificados de segurança.

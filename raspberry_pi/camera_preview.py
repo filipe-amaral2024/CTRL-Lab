@@ -8,12 +8,17 @@ from app.cameras.entry_camera import cv2
 
 logger = logging.getLogger(__name__)
 Preview = Tuple[int, bytes]
+PREVIEW_FPS = 24
 
 
 class RaspberryCameraPreview:
-    """Captures and publishes low-rate previews without running inference."""
+    """Captures and publishes previews without running inference."""
 
-    def __init__(self, camera, preview_interval_seconds: float = 0.5):
+    def __init__(
+        self,
+        camera,
+        preview_interval_seconds: float = 1.0 / PREVIEW_FPS,
+    ):
         if cv2 is None:
             raise RuntimeError("OpenCV is required for camera preview.")
         if preview_interval_seconds <= 0:
