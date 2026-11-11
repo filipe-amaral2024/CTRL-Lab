@@ -4,6 +4,8 @@
 
 Este documento registra o que foi implementado até o momento no projeto, com foco na arquitetura funcional do sistema e nos módulos já desenvolvidos.
 
+Para o escopo atual da apresentação, a inferência pode ser iniciada somente com o modelo pessoa/jaleco; a avaliação de visão exige jaleco, sem exigir calça, calçado ou cabelo. O modelo visual de fogo/fumaça permanece opcional. Sensores físicos configurados no runtime continuam independentes. Para detalhes atuais e pendências de hardware/modelos, consulte [FUNCIONAMENTO_ATUAL.md](./FUNCIONAMENTO_ATUAL.md) e [PENDENCIAS_CONCLUSAO.md](./PENDENCIAS_CONCLUSAO.md).
+
 ## 1. Estrutura do projeto atual
 
 ```text
@@ -68,11 +70,11 @@ O Raspberry concentra a execução e as decisões de visão, além das tarefas e
 - valores simulados de sensores somente quando executado com `--mock`;
 - publicação como indisponíveis dos sensores físicos que não estão conectados/implementados;
 - estados do sistema: NORMAL, WARNING, ALERT e EMERGENCY;
-- controle do buzzer via abstração de hardware; LEDs e sirene não são usados;
+- controle do buzzer via abstração de hardware, acionado somente em EMERGENCY; LEDs e sirene não são usados;
 - compatibilidade com modo mock para execução sem Raspberry real;
 - comunicação base para MQTT;
 - inferência CPU com OpenCV DNN e YOLOv8 ONNX, sem PyTorch no Pi;
-- captura de uma câmera USB compartilhada em thread separada para não atrasar o loop de sensores;
+- captura de uma câmera USB; a captura para inferência usa worker, enquanto a pré-visualização sem IA captura/codifica no loop cooperativo;
 - controle em execução do modelo de acesso por MQTT e pelo atalho `A` no terminal;
 - publicação dos resultados visuais junto ao status MQTT;
 - acionamento local de ALERTA/EMERGÊNCIA por EPI inadequado ou fogo/fumaça.
@@ -132,7 +134,7 @@ O projeto agora conta com duas opções de detector:
 
 O dashboard está disponível em `central/dashboard.py` e sua integração usa `CentralMQTTListener.set_access_model_enabled(enabled)`, que publica o comando no tópico MQTT `ctrlab/central/commands`. O controle recebe confirmação de estado em `vision.access.enabled` dentro do status publicado.
 
-O repositório não contém pesos. É necessário fornecer um ONNX YOLOv8 treinado para as classes `person`, `lab_coat`, `trousers`, `closed_shoes`, `long_hair`, `tied_hair`, `smoke` e `fire` (ou configurar as listas correspondentes). O cabelo preso só é exigido quando o modelo detectar cabelo comprido.
+O repositório não contém pesos. Para a demonstração atual, forneça um ONNX YOLOv8 treinado para `person` e `lab_coat`; a caixa de jaleco é associada à caixa da pessoa. O detector visual opcional de fogo/fumaça pode usar um modelo separado com classes `smoke` e `fire`. Outros requisitos de EPI não fazem parte do escopo atual da demonstração.
 
 Arquivos principais:
 
@@ -174,7 +176,7 @@ Arquivos de teste:
 1. Treinar/exportar e validar os dois pesos ONNX para as classes específicas.
 2. Instalar e configurar um broker MQTT no Raspberry e validar os comandos reais.
 3. Validar o dashboard e comandos em uma rede com Raspberry e broker reais.
-4. Medir FPS/CPU/RAM e estabilidade com a PS3 Eye e ambos os modelos no Raspberry.
+4. Medir FPS/CPU/RAM e estabilidade com a PS3 Eye e o modelo pessoa/jaleco no Raspberry.
 5. Validar o stream MJPEG e a taxa de quadros com a PS3 Eye no Raspberry real.
 
 ## 5. Observação

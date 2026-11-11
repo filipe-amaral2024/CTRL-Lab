@@ -149,13 +149,13 @@
       </article>
       <article class="card half-card">
         <h2>Modelos de visão</h2>
-        <div class="model-row"><div><strong>Segurança</strong><p class="subtle">Fumaça e incêndio</p></div><span id="safetyState" class="badge">Sem dados</span></div>
-        <div class="model-row"><div><strong>Acesso / EPI</strong><p class="subtle">Pode ser alternado remotamente</p></div><span id="accessState" class="badge">Sem dados</span></div>
+        <div class="model-row"><div><strong>Segurança visual</strong><p class="subtle">Fogo/fumaça (opcional)</p></div><span id="safetyState" class="badge">Sem dados</span></div>
+        <div class="model-row"><div><strong>Pessoa / jaleco</strong><p class="subtle">Verificação de jaleco, alternável</p></div><span id="accessState" class="badge">Sem dados</span></div>
         <p id="accessSummary" class="subtle"></p>
       </article>
       <article class="card half-card">
         <h2>Controle de acesso</h2>
-        <p class="subtle">Este comando altera somente o modelo de acesso. A checagem de segurança permanece ativa.</p>
+        <p class="subtle">Este comando altera somente a análise visual de pessoa/jaleco. As entradas físicas de risco continuam independentes.</p>
         <div class="token-row">
           <input id="controlToken" type="password" autocomplete="current-password" placeholder="Token de controle">
         </div>
@@ -285,7 +285,9 @@
         setBadge("safetyState",
           safetyRisk === "EMERGENCY" ? "EMERGÊNCIA" : safetyRisk === "NORMAL" ? "Ativo · normal" : safetyRisk,
           safetyRisk === "EMERGENCY" ? "bad" : safetyRisk === "NORMAL" ? "good" : "warn");
-        accessEnabled = typeof access.enabled === "boolean" ? access.enabled : null;
+        accessEnabled = access.available === false
+          ? null
+          : typeof access.enabled === "boolean" ? access.enabled : null;
         if (accessEnabled === null) {
           setBadge("accessState", access.status || "Sem dados", "");
         } else {

@@ -8,11 +8,14 @@ Este checklist traduz o estado do código em trabalho verificável para chegar a
 - [x] Estados de alerta, controle do buzzer e lógica de botão de emergência/reset.
 - [x] Suporte a DHT22, entrada digital de gás, câmera USB e stream MJPEG protegido.
 - [x] Infraestrutura de inferência OpenCV DNN para modelos YOLOv8 ONNX.
-- [x] Testes automatizados locais dos componentes principais; última suíte executada: 83 testes aprovados.
+- [x] Modo de inferência pessoa/jaleco sem exigir o modelo visual de fogo/fumaça.
+- [x] Avaliação visual focada somente em jaleco; associação no perfil legado e classe direta pessoa-com/sem-jaleco no perfil novo.
+- [x] Inicializador Windows aceita `-AccessModel` e transfere o ONNX para o Pi.
+- [x] Testes automatizados locais dos componentes principais; última suíte executada: 97 testes aprovados.
 - [ ] Modelos treinados/validados incluídos ou fornecidos para inferência real.
 - [ ] Deploy concluído no Raspberry acessível e teste integrado de ponta a ponta.
 - [ ] Medições e critérios de aceitação definidos para desempenho e qualidade de detecção.
-- [x] Fiação e comportamento físico dos sensores/atuadores confirmados.
+- [ ] Fiação e comportamento físico dos sensores/atuadores confirmados.
 
 ## Prioridade 0 — Desbloquear o Raspberry e comprovar o fluxo básico
 
@@ -63,28 +66,34 @@ Este checklist traduz o estado do código em trabalho verificável para chegar a
 
 ## Prioridade 1 — Tornar a visão computacional funcional
 
-### 5. Produzir os modelos de visão
+### 5. Obter e validar o modelo de pessoa/jaleco
 
-- [ ] Definir fonte e licença dos dados de treinamento para cada classe.
-- [ ] Montar e revisar conjuntos rotulados representativos do laboratório: pessoas, jaleco, calça, calçado fechado, cabelo longo/preso, fumaça e fogo conforme a estratégia dos modelos.
-- [ ] Treinar/exportar ONNX para o detector de segurança e para o detector de acesso; decidir se serão dois modelos ou um modelo com classes compatíveis.
-- [ ] Confirmar ordem dos nomes de classes em `--safety-classes` e `--access-classes`, dimensões da entrada e formato de saída compatível com `OpenCVDNNYOLODetector`.
+- [x] Adicionar localmente o dataset Lab Coat Detection 3 v12 (CC BY 4.0) com classes `person_with_labcoat` e `person_without_labcoat`.
+- [x] Criar conversor que preserva a origem e transforma as segmentações poligonais em caixas YOLO para detecção.
+- [x] Adaptar o avaliador e os inicializadores para aceitar as duas classes de status por pessoa, mantendo o perfil legado `person,lab_coat`.
+- [ ] Inspecionar visualmente amostras e confirmar a semântica/qualidade das anotações, inclusive no enquadramento da PS3 Eye.
+- [ ] Treinar um detector YOLOv8 com o conjunto convertido; verificar as licenças de treinamento, modelo inicial e pesos redistribuídos.
+- [ ] Avaliar no split `test` precisão/recall por classe, matriz de confusão, falsos alertas e pessoas sem jaleco incorretamente permitidas.
+- [ ] Confirmar ordem das classes `person_with_labcoat,person_without_labcoat`, dimensões da entrada e compatibilidade ONNX com `OpenCVDNNYOLODetector`.
+- [ ] Validar latência, limiar de confiança, enquadramento, ângulo, distância e iluminação da demonstração.
+- [ ] Treinar/exportar um modelo visual separado de fogo/fumaça somente se houver tempo e dados adequados; sensores físicos continuam como camada separada.
 - [ ] Versionar ou distribuir os pesos por canal documentado; não os inserir no repositório sem conferir tamanho, licença e política de distribuição.
 - [ ] Testar precisão/recall, falsos positivos e falsos negativos com cenas e iluminação reais. Uma imagem de demonstração não basta como validação.
 
-**Critério de aceite:** pesos ONNX identificados por versão e checksum, testes de inferência passam no Pi, e a matriz de confusão/avaliação documenta o desempenho por classe e limiar.
+**Critério de aceite:** um ONNX de pessoa/jaleco identificado por versão e checksum carrega no Pi, e a avaliação documenta acertos e erros no teste reservado e em cenas representativas da apresentação.
 
-### 6. Integrar inferência no Raspberry
+### 6. Integrar a inferência no Raspberry
 
-- [ ] Iniciar o runtime com `--safety-model <arquivo.onnx>`; adicionar `--access-model <arquivo.onnx>` somente quando estiver validado.
-- [ ] Confirmar que segurança permanece ativa e acesso começa desabilitado.
+- [ ] Iniciar pessoa/jaleco sozinho com `--access-model <arquivo.onnx>` ou `.\start-ctrlab.ps1 -AccessModel <arquivo.onnx>`.
+- [ ] Confirmar que o modelo de jaleco começa habilitado no modo de modelo único.
 - [ ] Validar alternância do acesso por tecla `A` em terminal interativo e pelo comando autenticado no dashboard.
+- [ ] Confirmar que o status visual de fogo/fumaça aparece como não configurado, sem afetar os sensores físicos.
 - [ ] Verificar serialização de detecções, estado visual, latência e comportamento quando arquivo/modelo está ausente ou inválido.
 - [ ] Medir duração real de cada inferência, ciclos efetivos, uso de CPU/memória e estabilidade térmica/USB sob carga.
-- [ ] Definir taxas/limites aceitáveis para a demonstração; o intervalo padrão de 3 s não garante a cadência quando o modelo demora mais.
+- [ ] Medir no Raspberry a cadência efetiva do padrão de inferência de 1 s e a estabilidade da votação por janelas de 5 s; o tempo do modelo pode alongar os ciclos.
 - [ ] Avaliar o custo da prévia junto com a inferência e ajustar captura, qualidade JPEG ou intervalo com medições, sem pressupor que 24 FPS seja sustentável.
 
-**Critério de aceite:** detector de segurança produz resultados corretos em cenários definidos; inferência não degrada o loop de sensores além dos limites acordados; o modelo de acesso não desativa a checagem de segurança.
+**Critério de aceite:** o detector de jaleco produz resultados consistentes em cenários definidos; inferência não degrada o loop de sensores além dos limites acordados; adicionar ou alternar o modelo de acesso não interfere nos sinais físicos de risco.
 
 ## Prioridade 2 — Fechar lógica de segurança e produto
 
@@ -93,6 +102,7 @@ Este checklist traduz o estado do código em trabalho verificável para chegar a
 - [ ] Validar `NORMAL`, `WARNING`, `ALERT` e `EMERGENCY` com entradas físicas e visuais controladas.
 - [ ] Testar travamento de emergência, liberação mecânica, reset e confirmação visual segura.
 - [ ] Confirmar comportamento se o detector falhar, a câmera desconectar, MQTT cair ou leitura do sensor expirar.
+- [ ] Verificar se sensores físicos dedicados de chama/fumaça estão conectados ao software; no runtime atual só a entrada digital do MQ-2 está configurada como sinal de gás/limiar.
 - [ ] Decidir a política para estado normal quando o dado ambiental está indisponível: indisponível não deve ser interpretado como condição comprovadamente segura.
 - [ ] Documentar limites, avisos e procedimentos operacionais.
 

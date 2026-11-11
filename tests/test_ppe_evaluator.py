@@ -4,6 +4,23 @@ from app.safety.ppe_evaluator import PPEEvaluator
 
 
 class PPEEvaluatorTests(unittest.TestCase):
+    def test_jaleco_only_profile_ignores_other_equipment(self):
+        evaluator = PPEEvaluator(
+            required_equipment={"lab_coat": "Jaleco ausente"}
+        )
+
+        result = evaluator.evaluate(
+            {
+                "person": True,
+                "lab_coat": True,
+                "trousers": False,
+                "closed_shoes": False,
+            }
+        )
+
+        self.assertEqual(result["status"], "PERMITIDO")
+        self.assertEqual(result["reasons"], [])
+
     def test_allow_access_when_required_gear_present(self):
         evaluator = PPEEvaluator()
         detections = {

@@ -314,10 +314,22 @@ class AlertManagerTests(unittest.TestCase):
         self.assertIsNone(payload["gas_detected"])
         self.assertIsNone(payload["emergency_button_pressed"])
 
-    def test_emergency_deactivates_all_actuator_outputs_without_led_control(self):
+    def test_buzzer_only_sounds_during_emergency(self):
         gpio = DummyGPIO()
         manager = AlertManager(self.config, gpio_controller=gpio)
-        reading = EnvironmentReading(
+        warning = EnvironmentReading(
+            temperature_c=25.0,
+            humidity_pct=50.0,
+            gas_ppm=0.45,
+            smoke_detected=False,
+        )
+        alert = EnvironmentReading(
+            temperature_c=31.0,
+            humidity_pct=50.0,
+            gas_ppm=None,
+            smoke_detected=False,
+        )
+        emergency = EnvironmentReading(
             temperature_c=None,
             humidity_pct=None,
             gas_ppm=None,
@@ -325,9 +337,11 @@ class AlertManagerTests(unittest.TestCase):
             emergency_button_pressed=True,
         )
 
-        manager.update(reading)
+        manager.update(warning)
+        manager.update(alert)
+        manager.update(emergency)
 
-        self.assertEqual(gpio.buzzer_values, [False])
+        self.assertEqual(gpio.buzzer_values, [False, True])
         self.assertFalse(hasattr(gpio, "set_led"))
 
 

@@ -79,7 +79,10 @@ def parse_args():
         help="Quantidade de frames capturados em --camera-test",
     )
     parser.add_argument("--safety-model", help="ONNX do modelo contínuo de fumaça/incêndio")
-    parser.add_argument("--access-model", help="ONNX opcional do modelo de verificação de EPI/acesso")
+    parser.add_argument(
+        "--access-model",
+        help="ONNX do modelo de pessoa/jaleco (pode ser usado sem --safety-model)",
+    )
     parser.add_argument(
         "--safety-classes",
         default="smoke,fire",
@@ -87,10 +90,16 @@ def parse_args():
     )
     parser.add_argument(
         "--access-classes",
-        default="person,lab_coat,trousers,closed_shoes,long_hair,tied_hair",
-        help="Classes do modelo de acesso, separadas por vírgula e na ordem do modelo",
+        default="person,lab_coat",
+        help="Classes do modelo de pessoa/jaleco, na ordem de saída do modelo",
     )
-    parser.add_argument("--inference-interval", type=float, default=3.0, help="Intervalo entre inferências em segundos")
+    parser.add_argument("--inference-interval", type=float, default=1.0, help="Intervalo entre inferências em segundos")
+    parser.add_argument(
+        "--access-vote-window",
+        type=float,
+        default=5.0,
+        help="Janela em segundos para estabilizar a classificação pessoa/jaleco (0 desativa)",
+    )
     parser.add_argument("--image-size", type=int, default=320, help="Lado da imagem de entrada do modelo ONNX")
     parser.add_argument(
         "--camera-stream-token",
@@ -112,6 +121,17 @@ def create_mqtt_client(config):
 
 def _parse_classes(class_names):
     return [name.strip() for name in class_names.split(",") if name.strip()]
+
+
+def _supports_access_classes(class_names):
+    normalized_classes = {name.strip().lower() for name in class_names}
+    return (
+        {"person", "lab_coat"}.issubset(normalized_classes)
+        or {
+            "person_with_labcoat",
+            "person_without_labcoat",
+        }.issubset(normalized_classes)
+    )
 
 
 def _run_camera_test(camera, frame_count):
@@ -164,14 +184,14 @@ def main():
     args = parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-    if args.access_model and not args.safety_model:
-        raise SystemExit("--access-model exige --safety-model para manter a checagem de segurança ativa.")
     if args.camera_device < 0:
         raise SystemExit("--camera-device deve ser zero ou maior.")
     if args.camera_test_frames <= 0:
         raise SystemExit("--camera-test-frames deve ser maior que zero.")
     if args.inference_interval <= 0:
         raise SystemExit("--inference-interval deve ser maior que zero.")
+    if args.access_vote_window < 0:
+        raise SystemExit("--access-vote-window deve ser zero ou maior.")
     if args.image_size <= 0:
         raise SystemExit("--image-size deve ser maior que zero.")
     if args.interval <= 0:
@@ -184,6 +204,12 @@ def main():
         raise SystemExit("--camera-stream-port deve estar entre 1 e 65535.")
     if args.camera_stream_token is not None and len(args.camera_stream_token) < 16:
         raise SystemExit("O token da câmera deve ter pelo menos 16 caracteres.")
+    if args.access_model:
+        if not _supports_access_classes(_parse_classes(args.access_classes)):
+            raise SystemExit(
+                "O modelo de acesso deve incluir 'person' e 'lab_coat', ou "
+                "'person_with_labcoat' e 'person_without_labcoat'."
+            )
     if args.camera_test:
         from app.cameras.entry_camera import CameraConfig, StreamCamera
 
@@ -204,7 +230,7 @@ def main():
     vision_service = None
     camera_preview = None
     camera = None
-    if args.safety_model or args.camera_stream_token:
+    if args.safety_model or args.access_model or args.camera_stream_token:
         from app.cameras.entry_camera import CameraConfig, StreamCamera
         from raspberry_pi.camera_preview import PREVIEW_FPS
 
@@ -214,25 +240,22 @@ def main():
             height=480,
             fps=PREVIEW_FPS,
         )
-        if args.camera_stream_token and not args.safety_model:
-            camera_config = CameraConfig(
-                name="ps3_eye",
-                width=640,
-                height=480,
-                fps=PREVIEW_FPS,
-            )
         camera = StreamCamera(
             camera_config,
             fallback_device=args.camera_device,
         )
 
-    if args.safety_model:
+    if args.safety_model or args.access_model:
         from app.vision.yolo_onnx import OpenCVDNNYOLODetector
 
-        safety_detector = OpenCVDNNYOLODetector(
-            args.safety_model,
-            class_names=_parse_classes(args.safety_classes),
-            input_size=args.image_size,
+        safety_detector = (
+            OpenCVDNNYOLODetector(
+                args.safety_model,
+                class_names=_parse_classes(args.safety_classes),
+                input_size=args.image_size,
+            )
+            if args.safety_model
+            else None
         )
         access_detector_factory = None
         if args.access_model:
@@ -249,8 +272,9 @@ def main():
             access_detector_factory=access_detector_factory,
             inference_interval_seconds=args.inference_interval,
             preview_enabled=bool(args.camera_stream_token),
+            access_vote_window_seconds=args.access_vote_window,
         )
-    elif args.camera_stream_token:
+    if args.camera_stream_token and vision_service is None:
         camera_preview = RaspberryCameraPreview(
             camera,
         )

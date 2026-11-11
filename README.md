@@ -25,8 +25,8 @@ Desenvolver um sistema capaz de verificar condições básicas de segurança no 
 - Habilitar/desabilitar a análise de acesso sem interromper a checagem de segurança.
 - Detectar visualmente fumaça e possíveis sinais de incêndio.
 - Integrar sensores ambientais ao sistema.
-- Exibir o estado pelo dashboard e acionar o buzzer em alertas não críticos.
-- Pausar câmera/visão e desligar as saídas físicas durante uma emergência, mantendo Raspberry Pi, botões e MQTT ativos para permitir reset e monitoramento.
+- Exibir o estado pelo dashboard; o buzzer físico toca somente em `EMERGENCY`.
+- Pausar câmera/visão durante uma emergência, mantendo Raspberry Pi, botões, buzzer de emergência e MQTT ativos para permitir reset e monitoramento.
 - Registrar eventos e ocorrências.
 - Disponibilizar uma interface para acompanhamento do sistema.
 - Demonstrar a integração entre inteligência artificial, software, sensores e sistemas embarcados.
@@ -34,6 +34,8 @@ Desenvolver um sistema capaz de verificar condições básicas de segurança no 
 ---
 
 ## 3. Funcionalidades propostas
+
+> **Escopo atual da apresentação:** visão computacional limitada a pessoa/jaleco, exigindo somente jaleco. Fogo/fumaça por visão permanece opcional; sensores físicos continuam como camada separada. A entrada atualmente implementada para gás é o DO digital do MQ-2.
 
 ### 3.1 Controle de acesso
 
@@ -75,7 +77,7 @@ O modelo de segurança deve permanecer ativo durante toda a execução visual e 
 | Segurança (fumaça/fogo) | Sempre ativo | Não pode ser desligado pelo dashboard ou teclado |
 | Acesso (pessoa/EPI) | Desabilitado | Tecla `A` no terminal ou comando MQTT do dashboard |
 
-Ao desabilitar o modelo de acesso, a câmera e o modelo de segurança continuam funcionando. Durante uma emergência, o runtime pausa câmera e visão, desliga buzzer e demais saídas, mas mantém sensores, botões, Raspberry Pi e telemetria ativos. O reset inicia uma nova verificação de segurança; a operação só retorna após uma inferência segura e a ausência de riscos críticos.
+Ao desabilitar o modelo de acesso, a câmera e o modelo de segurança continuam funcionando. Durante uma emergência, o runtime pausa câmera e visão e mantém o buzzer acionado, assim como sensores, botões, Raspberry Pi e telemetria. O reset inicia uma nova verificação de segurança; a operação só retorna após uma inferência segura e a ausência de riscos críticos.
 
 ---
 
@@ -99,7 +101,7 @@ Uma câmera, por exemplo, não consegue detectar diretamente um gás invisível.
 Quando uma situação inadequada for detectada, o sistema poderá:
 
 - Exibir um alerta no computador.
-- Acionar o buzzer em `WARNING`/`ALERT`; ele fica desligado durante uma emergência.
+- Acionar o buzzer somente em `EMERGENCY`; estados `WARNING`/`ALERT`, incluindo a detecção de pessoa sem jaleco, permanecem visuais/telemetrizados e não tocam o buzzer.
 - Registrar o evento.
 - Alterar o estado do sistema para `ALERTA` ou `EMERGÊNCIA`.
 
@@ -133,7 +135,7 @@ PS3 Eye USB ──► Raspberry Pi 3B+
 - Mantém segurança contínua mesmo quando a análise de acesso está desabilitada.
 - Análise de EPIs e detecção visual de fumaça/incêndio.
 - Leitura dos sensores.
-- Controle do buzzer apenas em `WARNING`/`ALERT`; durante `EMERGENCY`, o buzzer e a câmera/visão são pausados.
+- Controle do buzzer somente em `EMERGENCY`; durante esse estado, câmera/visão são pausadas.
 - Decisão e acionamento local dos alertas, sem depender do computador.
 
 ---
@@ -165,29 +167,27 @@ PS3 Eye USB ──► Raspberry Pi 3B+
 
 ## 6. Inteligência artificial
 
-O projeto não pretende desenvolver uma rede neural do zero. O Raspberry executa dois modelos YOLOv8 ONNX pequenos pelo OpenCV DNN, em CPU, sobre o mesmo frame da PS3 Eye. O modelo de segurança roda continuamente; o modelo de acesso é opcional e inicia desabilitado. Seu ONNX só é carregado quando habilitado e liberado da memória ao desativá-lo.
+O projeto não pretende desenvolver uma rede neural do zero. O Raspberry executa modelos YOLOv8 ONNX pelo OpenCV DNN, em CPU, sobre frames da PS3 Eye. Para a demonstração com prazo curto, o escopo visual é pessoa/jaleco e pode funcionar sem um modelo de fogo/fumaça. Se ambos forem configurados, segurança visual roda continuamente e o acesso inicia desabilitado. Os sensores físicos configurados continuam independentes da visão.
 
 Serão utilizadas bibliotecas e modelos existentes, principalmente:
 
 - **OpenCV DNN** para inferência local com o modelo YOLOv8 ONNX.
 - **Ultralytics**, opcional na máquina de desenvolvimento, para exportar modelos treinados.
 
-Os modelos são arquivos ONNX separados, com lista de classes própria: `smoke,fire` para segurança e `person,lab_coat,trousers,closed_shoes,long_hair,tied_hair` para acesso/EPI.
+Os modelos são arquivos ONNX separados, com listas de classes próprias. O detector de acesso aceita o perfil legado `person,lab_coat` ou as classes `person_with_labcoat,person_without_labcoat` do dataset Roboflow v12. O detector `smoke,fire` é opcional para segurança visual.
 
-O modelo de acesso pode ser ligado/desligado durante a execução pelo atalho `A` no terminal ou pelo dashboard via MQTT. Esse controle nunca desativa a checagem de segurança.
+O dataset Roboflow v12 é segmentado; `python .\tools\prepare_labcoat_dataset.py` gera uma cópia local de detecção com caixas YOLO para treinamento, sem alterar os polígonos originais. Instruções de treino, validação e exportação estão no [guia de execução](docs/GUIA_EXECUCAO.md). O repositório não contém pesos treinados.
+
+Quando executado sozinho, o modelo de pessoa/jaleco começa habilitado e pode ser pausado/reativado pelo atalho `A` no terminal ou pelo dashboard via MQTT. Quando segurança visual também está configurada, o acesso começa desabilitado; o seu controle nunca desativa a checagem de segurança.
 
 ### Possíveis classes do modelo de acesso/EPI
 
 ```text
-person
-lab_coat
-trousers
-closed_shoes
-long_hair
-tied_hair
+person_with_labcoat
+person_without_labcoat
 ```
 
-`tied_hair` só é obrigatório quando `long_hair` também for detectado. O modelo deve ser treinado para distinguir essas classes; ausência de detecção de cabelo comprido é interpretada como não aplicável.
+O fluxo com essas classes avalia diretamente o status de cada pessoa; `person_with_labcoat` é permitido e `person_without_labcoat` gera alerta. O perfil legado `person,lab_coat` ainda associa as caixas do jaleco à pessoa pela posição. Calça, calçado e cabelo não são requisitos do escopo atual de apresentação.
 
 ### Possíveis classes do modelo contínuo de segurança
 
@@ -443,7 +443,7 @@ O ambiente virtual usa pacotes do sistema para permitir o acesso à biblioteca G
 
 O `adafruit-circuitpython-dht` habilita o DHT22 avulso; instale a versão de `libgpiod` compatível com a versão do sistema quando exigida pelo driver. Olhando a grade do DHT22 de frente e os pinos para baixo: pino 1 -> 3,3 V; pino 2 -> GPIO17 (BCM); pino 3 -> sem conexão; pino 4 -> GND. Use um pull-up de aproximadamente 4,7 kΩ entre DATA e 3,3 V. A documentação do driver alerta que o suporte pode variar em Linux 64-bit, então esta leitura precisa ser confirmada no hardware real.
 
-O MQ-2 usa apenas a saída digital DO no GPIO5 (BCM), não mede ppm; confirme se DO é ativo em LOW ou HIGH e use adaptação de nível se a saída ultrapassar 3,3 V. O botão de emergência com trava mecânica fica entre GPIO6 (BCM) e GND; após destravá-lo mecanicamente, pressione o botão de reset no GPIO13. Com modelo de segurança configurado, o reset reinicia a visão e aguarda inferência segura e ausência de riscos críticos. A solicitação de reset é mantida enquanto a visão executa essa verificação, mesmo se o botão for solto. Sem modelo de segurança, só é possível validar os sensores conectados; não há confirmação visual.
+O MQ-2 usa apenas a saída digital DO no GPIO5 (BCM), não mede ppm; confirme se DO é ativo em LOW ou HIGH e use adaptação de nível se a saída ultrapassar 3,3 V. O botão de emergência com trava mecânica fica entre GPIO6 (BCM) e GND; após destravá-lo mecanicamente, pressione o botão de reset no GPIO13. Com um modelo visual configurado, o reset reinicia a visão e aguarda uma inferência válida; se somente pessoa/jaleco estiver configurado, isso não confirma ausência visual de fogo/fumaça. A solicitação de reset é mantida enquanto a visão executa essa verificação, mesmo se o botão for solto. Sem modelo visual, só é possível validar os sensores conectados.
 
 Esta parada é implementada por software e não substitui uma parada de emergência elétrica/certificada: não interrompe a alimentação do Raspberry Pi nem oferece isolamento de potência dos equipamentos.
 
@@ -469,20 +469,25 @@ python -m raspberry_pi.main --camera-test --camera-device 0 --camera-test-frames
 
 O comando informa quantos frames foram capturados, FPS e resolução, e encerra sem iniciar GPIO/MQTT. Para testar o broker instalado no Pi, inicie o serviço (`sudo systemctl enable --now mosquitto`) e valide localmente com `mosquitto_pub`/`mosquitto_sub`; acesso do dashboard pela rede exige configuração adicional do broker e não deve ser aberto sem autenticação.
 
-Use um segredo de pelo menos 16 caracteres para proteger o stream. Para apenas visualizar a câmera sem IA, inicie o runtime no Pi com `--camera-stream-token` e sem `--safety-model`; a câmera transmite vídeo mas não analisa fumaça/fogo. Esse modo solicita 640x480 a até 24 FPS e captura/codifica de forma síncrona no loop cooperativo, evitando uma thread de captura concorrente com os sensores. O loop de controle roda a 48 Hz; o DHT22 é consultado a cada 5 s por padrão (mínimo efetivo: 2 s) e o log/status MQTT é atualizado a cada segundo. A última leitura válida do DHT22 é mantida por até 12 s; depois disso, temperatura e umidade aparecem como indisponíveis, com a idade da leitura no campo `dht_age_seconds`. MQ-2 e botões continuam sendo verificados a 48 Hz. O intervalo maior reduz as leituras do DHT22, mas não reduz diretamente o trabalho da câmera. Isso não garante temporização de tempo real nem elimina possíveis problemas elétricos, de USB ou do sistema operacional. Para inferência, forneça também `--safety-model`; esse modo usa o serviço de visão existente e não compartilha o escalonamento cooperativo da pré-visualização sem IA. Durante uma emergência, a pré-visualização para e recomeça após o reset. Exemplo com os modelos configurados; o modelo de acesso começa desabilitado e pode ser alternado com `A`:
+Use um segredo de pelo menos 16 caracteres para proteger o stream. Para visualizar a câmera sem IA, inicie o runtime no Pi com `--camera-stream-token` e sem modelos; a câmera transmite vídeo, mas não analisa fogo, fumaça ou jaleco. Esse modo solicita 640x480 a até 24 FPS e captura/codifica de forma síncrona no loop cooperativo. Para inferência de pessoa/jaleco, forneça `--access-model`; com esse modelo isolado, a captura/inferência roda pelo serviço de visão e o modelo começa habilitado. O loop de controle roda a 48 Hz; o DHT22 é consultado a cada 5 s por padrão (mínimo efetivo: 2 s) e o log/status MQTT é atualizado a cada segundo. A última leitura válida do DHT22 é mantida por até 12 s; depois disso, temperatura e umidade aparecem como indisponíveis, com a idade da leitura no campo `dht_age_seconds`. MQ-2 e botões continuam sendo verificados a 48 Hz. O intervalo maior reduz as leituras do DHT22, mas não reduz diretamente o trabalho da câmera. Isso não garante temporização de tempo real nem elimina possíveis problemas elétricos, de USB ou do sistema operacional. Durante uma emergência, a câmera/visão para e recomeça após o reset, conforme os sinais disponíveis e os modelos configurados.
 
 ```bash
 export CTRL_LAB_CAMERA_TOKEN="use-o-mesmo-token-configurado-no-dashboard"
 python3 -m raspberry_pi.main \
   --broker localhost \
   --camera-device 0 \
-  --safety-model models/ctrlab-safety.onnx \
   --access-model models/ctrlab-access.onnx \
-  --safety-classes smoke,fire \
-  --access-classes person,lab_coat,trousers,closed_shoes,long_hair,tied_hair \
+  --access-classes person,lab_coat \
+  --camera-stream-token "$CTRL_LAB_CAMERA_TOKEN" \
+  --camera-stream-host 127.0.0.1 \
   --image-size 320 \
-  --inference-interval 3
+  --inference-interval 1 \
+  --access-vote-window 5
 ```
+
+O acesso publica a classe vencedora por pessoa ao final de cada janela de 5 segundos; as caixas são associadas entre inferências por sobreposição. Durante a primeira janela, os rótulos ficam como `ANALISANDO`. Use `--access-vote-window 0` para desativar a votação temporal.
+
+Para executar também o detector visual opcional de fogo/fumaça, acrescente `--safety-model models/ctrlab-safety.onnx --safety-classes smoke,fire`. O modelo de pessoa/jaleco começa habilitado quando é o único modelo configurado; com o modelo de segurança adicional, o acesso começa desabilitado.
 
 Para pré-visualização sem inferência, use:
 
@@ -503,15 +508,15 @@ Inicie o dashboard com o mesmo token:
 python -m central.dashboard --host 127.0.0.1 --port 8000 --broker 127.0.0.1 --mqtt-port 1884 --control-token "<TOKEN_DO_DASHBOARD>" --camera-stream-token "<TOKEN_DA_CAMERA>" --camera-stream-url http://127.0.0.1:8081/video.mjpg
 ```
 
-O serviço pode ser executado apenas com segurança, omitindo `--access-model`. Para controle do dashboard, use `CentralMQTTListener.set_access_model_enabled(True)` (ou publique o payload diretamente no tópico `ctrlab/central/commands`):
+Quando um modelo de acesso está configurado, use `CentralMQTTListener.set_access_model_enabled(True)` (ou publique o payload diretamente no tópico `ctrlab/central/commands`) para controlá-lo:
 
 ```json
 {"command":"set_access_model","enabled":true}
 ```
 
-Use `enabled: false` para desabilitar o modelo de acesso. O serviço publica `vision.access.enabled` junto aos resultados no tópico `ctrlab/raspberry/status`. O modelo de segurança não possui comando de desligamento.
+Use `enabled: false` para desabilitar o modelo de acesso. O serviço publica `vision.access.enabled` junto aos resultados no tópico `ctrlab/raspberry/status`. O modelo visual de segurança, quando configurado, não possui comando de desligamento.
 
-Cada modelo deve ser YOLOv8 em ONNX com saída sem NMS no formato `[1, 4 + número_de_classes, candidatos]`. Os nomes e a ordem de cada argumento `--*-classes` precisam corresponder exatamente às classes usadas no treinamento. Um modelo COCO genérico não reconhece automaticamente jaleco, calça, calçado fechado, cabelo comprido/preso, fumaça ou fogo: use modelos treinados para essas classes. Para exportar, em uma máquina de desenvolvimento com Ultralytics instalado:
+Cada modelo deve ser YOLOv8 em ONNX com saída sem NMS no formato `[1, 4 + número_de_classes, candidatos]`. Os nomes e a ordem de cada argumento `--*-classes` precisam corresponder exatamente às classes usadas no treinamento. Um modelo COCO genérico não reconhece automaticamente jaleco; use um detector treinado para essa classe. Para exportar, em uma máquina de desenvolvimento com Ultralytics instalado:
 
 ```bash
 yolo export model=best.pt format=onnx imgsz=320

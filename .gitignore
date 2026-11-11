@@ -8,3 +8,5 @@ venv/
 .env.*
 *.log
 .DS_Store
+/training/generated/labcoat-detection/
+/training/runs/

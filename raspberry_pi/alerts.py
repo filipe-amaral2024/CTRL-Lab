@@ -119,7 +119,7 @@ class AlertManager:
         if self.gpio is None:
             return
 
-        buzzer_on = state in (SystemState.WARNING, SystemState.ALERT)
+        buzzer_on = state == SystemState.EMERGENCY
         if buzzer_on != self._buzzer_on:
             self.gpio.set_buzzer(buzzer_on)
             self._buzzer_on = buzzer_on

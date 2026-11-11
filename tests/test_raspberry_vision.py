@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from app.vision.yolo_base import DetectionResult
 from raspberry_pi.alerts import SystemState
-from raspberry_pi.main import _handle_access_command
+from raspberry_pi.main import _handle_access_command, _supports_access_classes
 from raspberry_pi.vision import CameraSource, ObjectDetector, RaspberryVisionService
 
 
@@ -27,6 +27,11 @@ class DummyCamera(CameraSource):
 
     def close(self) -> None:
         self.opened = False
+
+
+class DummyFrame:
+    def copy(self):
+        return DummyFrame()
 
 
 class SafetyDetector(ObjectDetector):
@@ -50,6 +55,19 @@ class AccessDetector(ObjectDetector):
 
 
 class RaspberryVisionServiceTests(unittest.TestCase):
+    def test_access_class_validation_supports_both_model_profiles(self):
+        self.assertTrue(_supports_access_classes(["person", "lab_coat"]))
+        self.assertTrue(
+            _supports_access_classes(
+                ["person_with_labcoat", "person_without_labcoat"]
+            )
+        )
+        self.assertFalse(
+            _supports_access_classes(
+                ["person_with_labcoat", "labcoat"]
+            )
+        )
+
     def test_preview_captures_frames_without_waiting_for_inference_interval(self):
         fake_cv2 = SimpleNamespace(
             imencode=lambda extension, frame: (True, SimpleNamespace(tobytes=lambda: b"jpeg"))
@@ -66,7 +84,11 @@ class RaspberryVisionServiceTests(unittest.TestCase):
             service.start()
             deadline = time.monotonic() + 2
             while (
-                (service.latest_preview() is None or camera.read_count < 2)
+                (
+                    service.latest_preview() is None
+                    or service.latest_preview()[0] < 2
+                    or camera.read_count < 2
+                )
                 and time.monotonic() < deadline
             ):
                 time.sleep(0.01)
@@ -112,7 +134,7 @@ class RaspberryVisionServiceTests(unittest.TestCase):
             self.assertTrue(service.snapshot()["safety_ready"])
             self.assertTrue(service.stop())
 
-    def test_safety_runs_continuously_and_access_is_opt_in_on_same_frame(self):
+    def test_safety_runs_and_access_is_opt_in_on_same_frame(self):
         camera = DummyCamera("ps3-eye-frame")
         safety_detector = SafetyDetector(
             [DetectionResult("smoke", 0.82), DetectionResult("fire", 0.10)]
@@ -142,11 +164,7 @@ class RaspberryVisionServiceTests(unittest.TestCase):
         service.stop()
 
         self.assertEqual(enabled_result["state"], SystemState.EMERGENCY)
-        self.assertEqual(enabled_result["details"]["access"]["status"], "ALERTA")
-        self.assertIn(
-            "Calçado fechado ausente",
-            enabled_result["details"]["access"]["reasons"],
-        )
+        self.assertEqual(enabled_result["details"]["access"]["status"], "PERMITIDO")
         self.assertEqual(safety_detector.frames, ["ps3-eye-frame", "ps3-eye-frame"])
         self.assertEqual(access_detector.frames, ["ps3-eye-frame"])
         self.assertEqual(camera.read_count, 2)
@@ -167,7 +185,7 @@ class RaspberryVisionServiceTests(unittest.TestCase):
         self.assertEqual(safety_detector.frames, ["frame"])
         self.assertEqual(result["details"]["safety"]["risk"], "NORMAL")
 
-    def test_access_evaluation_uses_only_lab_trousers_shoes_and_long_hair_rules(self):
+    def test_access_evaluation_requires_only_a_person_and_lab_coat(self):
         camera = DummyCamera("frame")
         access_detector = AccessDetector(
             [
@@ -189,9 +207,140 @@ class RaspberryVisionServiceTests(unittest.TestCase):
         service.stop()
 
         self.assertEqual(result["details"]["access"]["status"], "PERMITIDO")
-        self.assertNotIn("safety_glasses", result["details"]["access"]["detections"])
+        self.assertEqual(result["details"]["access"]["person_count"], 1)
+        self.assertEqual(result["details"]["access"]["compliant_count"], 1)
 
-    def test_access_evaluation_requires_long_hair_to_be_tied(self):
+    def test_access_preview_draws_green_and_red_person_boxes(self):
+        drawing_calls = []
+        fake_cv2 = SimpleNamespace(
+            rectangle=lambda frame, start, end, color, thickness: drawing_calls.append(
+                ("rectangle", start, end, color)
+            ),
+            putText=lambda frame, text, origin, font, scale, color, thickness, line: drawing_calls.append(
+                ("text", text, color)
+            ),
+            imencode=lambda extension, frame: (
+                True,
+                SimpleNamespace(tobytes=lambda: b"jpeg"),
+            ),
+            FONT_HERSHEY_SIMPLEX=0,
+            LINE_AA=1,
+        )
+        detections = [
+            DetectionResult("person_with_labcoat", 0.91, 10, 20, 100, 180),
+            DetectionResult("person_without_labcoat", 0.87, 120, 25, 210, 185),
+        ]
+        service = RaspberryVisionService(
+            camera=DummyCamera(DummyFrame()),
+            safety_detector=SafetyDetector(),
+            access_detector=AccessDetector(detections),
+            preview_enabled=True,
+        )
+        service.open()
+        service.set_access_enabled(True)
+
+        with patch("raspberry_pi.vision.cv2", fake_cv2):
+            service.process_once()
+            annotated_calls = list(drawing_calls)
+            with service._lock:
+                service._access_annotations_updated_at = time.monotonic() - 2
+            service._store_preview(DummyFrame())
+        service.stop()
+
+        self.assertIn(("rectangle", (10, 20), (100, 180), (0, 200, 0)), drawing_calls)
+        self.assertIn(("rectangle", (120, 25), (210, 185), (0, 0, 255)), drawing_calls)
+        self.assertIn(("text", "COM JALECO 91%", (0, 200, 0)), drawing_calls)
+        self.assertIn(("text", "SEM JALECO 87%", (0, 0, 255)), drawing_calls)
+        self.assertEqual(drawing_calls, annotated_calls)
+
+    def test_access_status_uses_majority_of_each_five_second_window(self):
+        service = RaspberryVisionService(
+            camera=DummyCamera("frame"),
+            access_detector=AccessDetector(),
+            access_vote_window_seconds=5,
+        )
+
+        def result_at(second, status):
+            return service._stabilize_access_result(
+                {
+                    "status": status,
+                    "enabled": True,
+                    "annotations": [
+                        {
+                            "x1": 10,
+                            "y1": 10,
+                            "x2": 100,
+                            "y2": 180,
+                            "status": status,
+                            "confidence": 0.9,
+                        }
+                    ],
+                    "detections": [],
+                },
+                second,
+            )
+
+        self.assertEqual(result_at(0, "PERMITIDO")["status"], "AGUARDANDO")
+        result_at(1, "ALERTA")
+        result_at(2, "PERMITIDO")
+        result_at(3, "ALERTA")
+        self.assertEqual(result_at(4, "PERMITIDO")["status"], "AGUARDANDO")
+        first_window = result_at(5, "ALERTA")
+        self.assertEqual(first_window["status"], "PERMITIDO")
+        self.assertEqual(first_window["annotations"][0]["status"], "PERMITIDO")
+
+        result_at(6, "ALERTA")
+        result_at(7, "ALERTA")
+        result_at(8, "PERMITIDO")
+        result_at(9, "ALERTA")
+        second_window = result_at(10, "ALERTA")
+        self.assertEqual(second_window["status"], "ALERTA")
+        self.assertEqual(second_window["annotations"][0]["status"], "ALERTA")
+
+    def test_access_vote_tracks_people_independently_across_frames(self):
+        service = RaspberryVisionService(
+            camera=DummyCamera("frame"),
+            access_detector=AccessDetector(),
+            access_vote_window_seconds=5,
+        )
+        result = None
+        for second in range(6):
+            result = service._stabilize_access_result(
+                {
+                    "status": "ALERTA",
+                    "enabled": True,
+                    "annotations": [
+                        {
+                            "x1": 10 + second,
+                            "y1": 10,
+                            "x2": 100 + second,
+                            "y2": 180,
+                            "status": "PERMITIDO",
+                            "confidence": 0.9,
+                        },
+                        {
+                            "x1": 200 + second,
+                            "y1": 10,
+                            "x2": 290 + second,
+                            "y2": 180,
+                            "status": "ALERTA",
+                            "confidence": 0.9,
+                        },
+                    ],
+                    "detections": [],
+                },
+                second,
+            )
+
+        self.assertEqual(result["status"], "ALERTA")
+        self.assertEqual(result["person_count"], 2)
+        self.assertEqual(result["compliant_count"], 1)
+        self.assertEqual(
+            [annotation["status"] for annotation in result["annotations"]],
+            ["PERMITIDO", "ALERTA"],
+        )
+
+    def test_access_evaluation_does_not_require_unconfigured_equipment(self):
         camera = DummyCamera("frame")
         access_detector = AccessDetector(
             [
@@ -213,11 +362,127 @@ class RaspberryVisionServiceTests(unittest.TestCase):
         result = service.process_once()
         service.stop()
 
-        self.assertEqual(result["details"]["access"]["status"], "ALERTA")
-        self.assertIn(
-            "Cabelo comprido não está amarrado",
-            result["details"]["access"]["reasons"],
+        self.assertEqual(result["details"]["access"]["status"], "PERMITIDO")
+
+    def test_access_only_model_starts_enabled_without_visual_safety_model(self):
+        camera = DummyCamera("frame")
+        access_detector = AccessDetector(
+            [
+                DetectionResult("person", 0.95, 10, 10, 90, 100),
+                DetectionResult("lab_coat", 0.9, 25, 20, 75, 65),
+            ]
         )
+        service = RaspberryVisionService(
+            camera=camera,
+            access_detector=access_detector,
+        )
+        service.open()
+
+        self.assertTrue(service.snapshot()["access_enabled"])
+        result = service.process_once()
+        service.stop()
+
+        self.assertEqual(result["details"]["safety"]["risk"], "NAO_CONFIGURADO")
+        self.assertEqual(result["details"]["access"]["status"], "PERMITIDO")
+        self.assertEqual(result["state"], SystemState.NORMAL)
+
+    def test_lab_coat_is_associated_with_its_person(self):
+        service = RaspberryVisionService(
+            camera=DummyCamera("frame"),
+            access_detector=AccessDetector(
+                [
+                    DetectionResult("person", 0.95, 0, 0, 100, 200),
+                    DetectionResult("person", 0.95, 100, 0, 200, 200),
+                    DetectionResult("lab_coat", 0.9, 20, 20, 80, 80),
+                ]
+            ),
+        )
+        service.open()
+
+        result = service.process_once()
+        service.stop()
+
+        access = result["details"]["access"]
+        self.assertEqual(access["status"], "ALERTA")
+        self.assertEqual(access["person_count"], 2)
+        self.assertEqual(access["compliant_count"], 1)
+        self.assertIn("Jaleco ausente em 1 pessoa(s)", access["reasons"])
+
+    def test_person_status_classes_evaluate_each_detected_person(self):
+        service = RaspberryVisionService(
+            camera=DummyCamera("frame"),
+            access_detector=AccessDetector(
+                [
+                    DetectionResult("person_with_labcoat", 0.94, 10, 10, 90, 100),
+                    DetectionResult("person_without_labcoat", 0.91, 100, 10, 190, 100),
+                ]
+            ),
+        )
+        service.open()
+
+        result = service.process_once()
+        service.stop()
+
+        access = result["details"]["access"]
+        self.assertEqual(access["status"], "ALERTA")
+        self.assertEqual(access["person_count"], 2)
+        self.assertEqual(access["compliant_count"], 1)
+        self.assertIn("Jaleco ausente em 1 pessoa(s)", access["reasons"])
+
+    def test_person_status_model_allows_all_detected_people_with_labcoats(self):
+        service = RaspberryVisionService(
+            camera=DummyCamera("frame"),
+            access_detector=AccessDetector(
+                [
+                    DetectionResult("person_with_labcoat", 0.94),
+                    DetectionResult("person_with_labcoat", 0.90),
+                ]
+            ),
+        )
+        service.open()
+
+        result = service.process_once()
+        service.stop()
+
+        access = result["details"]["access"]
+        self.assertEqual(access["status"], "PERMITIDO")
+        self.assertEqual(access["person_count"], 2)
+        self.assertEqual(access["compliant_count"], 2)
+
+    def test_access_model_error_is_not_reported_as_normal(self):
+        def fail_to_create_detector():
+            raise RuntimeError("invalid model")
+
+        service = RaspberryVisionService(
+            camera=DummyCamera("frame"),
+            access_detector_factory=fail_to_create_detector,
+        )
+        service.open()
+
+        with self.assertLogs("raspberry_pi.vision", level="ERROR"):
+            result = service.process_once()
+        service.stop()
+
+        self.assertEqual(result["details"]["access"]["status"], "ERRO")
+        self.assertEqual(result["state"], SystemState.ALERT)
+        self.assertFalse(result["safety_ready"])
+
+    def test_access_only_camera_failure_is_not_reported_as_normal(self):
+        camera = DummyCamera(None)
+        camera.last_error = "camera disconnected"
+        service = RaspberryVisionService(
+            camera=camera,
+            access_detector=AccessDetector(),
+        )
+        service.open()
+
+        with self.assertLogs("raspberry_pi.vision", level="WARNING"):
+            result = service.process_once()
+        service.stop()
+
+        self.assertEqual(result["details"]["access"]["status"], "ERRO")
+        self.assertEqual(result["state"], SystemState.ALERT)
+        self.assertFalse(result["safety_ready"])
 
     def test_no_person_does_not_report_missing_ppe(self):
         camera = DummyCamera("entry")

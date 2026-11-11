@@ -5,7 +5,9 @@ param(
     [int]$CameraDevice = 0,
     [int]$DashboardPort = 8000,
     [int]$MqttTunnelPort = 1884,
-    [int]$CameraTunnelPort = 8081
+    [int]$CameraTunnelPort = 8081,
+    [string]$AccessModel = "",
+    [string]$AccessClasses = "person,lab_coat"
 )
 
 $ErrorActionPreference = "Stop"
@@ -139,6 +141,36 @@ foreach ($port in @($DashboardPort, $MqttTunnelPort, $CameraTunnelPort)) {
     if ($port -lt 1 -or $port -gt 65535) {
         Stop-WithMessage "As portas devem estar entre 1 e 65535."
     }
+}
+if ($AccessModel) {
+    if (-not (Test-Path -LiteralPath $AccessModel -PathType Leaf)) {
+        Stop-WithMessage "Arquivo do modelo de acesso nao encontrado: $AccessModel"
+    }
+    if ([IO.Path]::GetExtension($AccessModel) -ne ".onnx") {
+        Stop-WithMessage "O modelo de acesso deve estar no formato ONNX."
+    }
+    $AccessModel = (Resolve-Path -LiteralPath $AccessModel).Path
+}
+if ($AccessClasses -notmatch '^[A-Za-z0-9_,]+$') {
+    Stop-WithMessage "AccessClasses deve conter apenas nomes de classe separados por virgula."
+}
+$accessClassList = @(
+    $AccessClasses.Split(',') |
+        ForEach-Object { $_.Trim().ToLowerInvariant() }
+)
+$hasSeparateEquipmentClasses = (
+    $accessClassList -contains "person" -and
+    $accessClassList -contains "lab_coat"
+)
+$hasPersonStatusClasses = (
+    $accessClassList -contains "person_with_labcoat" -and
+    $accessClassList -contains "person_without_labcoat"
+)
+if (-not $hasSeparateEquipmentClasses -and -not $hasPersonStatusClasses) {
+    Stop-WithMessage (
+        "AccessClasses deve incluir person,lab_coat ou " +
+        "person_with_labcoat,person_without_labcoat."
+    )
 }
 
 $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
@@ -277,6 +309,16 @@ Invoke-CheckedCommand `
     -FilePath $scpCommand.Source `
     -Arguments $scpArguments `
     -FailureMessage "Falha ao copiar os modulos do projeto para o Raspberry Pi"
+if ($AccessModel) {
+    Invoke-CheckedCommand `
+        -FilePath $sshCommand.Source `
+        -Arguments (@($sshAuthArguments) + @($target, "mkdir -p ~/CTRL-Lab/models")) `
+        -FailureMessage "Nao foi possivel preparar o diretorio do modelo no Raspberry Pi"
+    Invoke-CheckedCommand `
+        -FilePath $scpCommand.Source `
+        -Arguments (@($sshAuthArguments) + @($AccessModel, "${target}:~/CTRL-Lab/models/ctrlab-access.onnx")) `
+        -FailureMessage "Falha ao copiar o modelo de acesso para o Raspberry Pi"
+}
 
 $setupScript = @'
 set -euo pipefail
@@ -398,11 +440,19 @@ while read -r existing_pid; do
 done < <(pgrep -f '[p]ython.*-m raspberry_pi.main' || true)
 
 export CTRL_LAB_CAMERA_TOKEN="__CAMERA_TOKEN__"
-nohup .venv/bin/python -m raspberry_pi.main \
-    --broker localhost \
-    --camera-device __CAMERA_DEVICE__ \
-    --camera-stream-token "$CTRL_LAB_CAMERA_TOKEN" \
-    --camera-stream-host 127.0.0.1 \
+runtime_args=(
+    --broker localhost
+    --camera-device __CAMERA_DEVICE__
+    --camera-stream-token "$CTRL_LAB_CAMERA_TOKEN"
+    --camera-stream-host 127.0.0.1
+)
+if [[ "__ACCESS_MODEL_ENABLED__" == "true" ]]; then
+    runtime_args+=(
+        --access-model models/ctrlab-access.onnx
+        --access-classes "__ACCESS_CLASSES__"
+    )
+fi
+nohup .venv/bin/python -m raspberry_pi.main "${runtime_args[@]}" \
     > ctrlab_runtime.log 2>&1 < /dev/null &
 runtime_pid=$!
 sleep 4
@@ -422,7 +472,18 @@ tail -n 8 ctrlab_runtime.log
 '@
 $runtimeScript = $runtimeScript.Replace("__CAMERA_TOKEN__", $cameraToken)
 $runtimeScript = $runtimeScript.Replace("__CAMERA_DEVICE__", [string]$CameraDevice)
-Write-Host "Iniciando sensores e pre-visualizacao sem IA no Raspberry Pi..."
+$accessModelEnabled = if ($AccessModel) { "true" } else { "false" }
+$runtimeScript = $runtimeScript.Replace(
+    "__ACCESS_MODEL_ENABLED__",
+    $accessModelEnabled
+)
+$runtimeScript = $runtimeScript.Replace("__ACCESS_CLASSES__", $AccessClasses)
+if ($AccessModel) {
+    Write-Host "Iniciando sensores e inferencia de pessoa/jaleco no Raspberry Pi..."
+}
+else {
+    Write-Host "Iniciando sensores e pre-visualizacao sem IA no Raspberry Pi..."
+}
 Invoke-RemoteBash `
     -SshPath $sshCommand.Source `
     -SshArguments $sshAuthArguments `
@@ -466,33 +527,58 @@ if (-not $tunnelReady) {
     Stop-WithMessage "O tunel SSH nao abriu as portas locais. Confira a janela do tunel e a autenticacao SSH."
 }
 
-$cameraResponse = $null
-try {
-    $cameraRequest = [Net.HttpWebRequest]::Create(
-        "http://127.0.0.1:$CameraTunnelPort/video.mjpg"
-    )
-    $cameraRequest.Method = "GET"
-    $cameraRequest.Timeout = 5000
-    $cameraRequest.ReadWriteTimeout = 5000
-    $cameraRequest.Headers.Add("X-CTRL-Lab-Token", $cameraToken)
-    $cameraResponse = $cameraRequest.GetResponse()
-    if ([int]$cameraResponse.StatusCode -ne 200) {
-        Stop-WithMessage "A camera nao respondeu com HTTP 200."
+$cameraReady = $false
+$cameraDeadline = [DateTime]::UtcNow.AddSeconds(60)
+$cameraLastError = $null
+Write-Host "Aguardando a camera e a primeira inferencia do modelo..."
+while (-not $cameraReady -and [DateTime]::UtcNow -lt $cameraDeadline) {
+    $cameraResponse = $null
+    try {
+        $cameraRequest = [Net.HttpWebRequest]::Create(
+            "http://127.0.0.1:$CameraTunnelPort/video.mjpg"
+        )
+        $cameraRequest.Method = "GET"
+        $cameraRequest.Timeout = 3000
+        $cameraRequest.ReadWriteTimeout = 3000
+        $cameraRequest.Headers.Add("X-CTRL-Lab-Token", $cameraToken)
+        $cameraResponse = $cameraRequest.GetResponse()
+        $cameraReady = [int]$cameraResponse.StatusCode -eq 200
+        if (-not $cameraReady) {
+            $cameraLastError = "HTTP $([int]$cameraResponse.StatusCode)"
+        }
+    }
+    catch [Net.WebException] {
+        $cameraResponse = $_.Exception.Response
+        if ($cameraResponse -and [int]$cameraResponse.StatusCode -ne 503) {
+            $cameraLastError = "HTTP $([int]$cameraResponse.StatusCode)"
+            $cameraDeadline = [DateTime]::UtcNow
+        }
+        elseif (-not $cameraResponse) {
+            $cameraLastError = $_.Exception.Message
+        }
+    }
+    finally {
+        if ($cameraResponse) {
+            $cameraResponse.Close()
+        }
+    }
+
+    if (-not $cameraReady -and [DateTime]::UtcNow -lt $cameraDeadline) {
+        Start-Sleep -Milliseconds 500
     }
 }
-catch {
+
+if (-not $cameraReady) {
     Invoke-RemoteBash `
         -SshPath $sshCommand.Source `
         -SshArguments $sshAuthArguments `
         -Target $target `
         -ScriptText 'cd "$HOME/CTRL-Lab" && tail -n 30 ctrlab_runtime.log' `
         -FailureMessage "Falha ao consultar os logs do runtime"
-    Stop-WithMessage "A pre-visualizacao da camera ainda nao esta disponivel. Confira a camera USB e o indice configurado."
-}
-finally {
-    if ($cameraResponse) {
-        $cameraResponse.Close()
+    if ($cameraLastError) {
+        Stop-WithMessage "A pre-visualizacao da camera nao ficou pronta em 60 segundos. Ultimo erro: $cameraLastError"
     }
+    Stop-WithMessage "A pre-visualizacao da camera nao ficou pronta em 60 segundos. Confira a camera USB, o indice configurado e os logs acima."
 }
 
 $dashboardScript = @"
@@ -550,7 +636,13 @@ if ($dashboardReady -and
 Write-Host "Token de controle para informar no dashboard: $controlToken"
 Write-Host "Token de camera gerado para esta execucao; ele foi configurado automaticamente no Pi e no dashboard."
 Write-Host ""
-Write-Host "Modo iniciado: pre-visualizacao sem IA (nao detecta fogo, fumaca ou EPI)."
+if ($AccessModel) {
+    Write-Host "Modo iniciado: inferencia de pessoa/jaleco; deteccao visual de fogo/fumaca nao configurada."
+    Write-Host "Sensores fisicos configurados no runtime continuam ativos."
+}
+else {
+    Write-Host "Modo iniciado: pre-visualizacao sem IA (nao detecta fogo, fumaca ou EPI)."
+}
 Write-Host "Log do runtime no Pi: ~/CTRL-Lab/ctrlab_runtime.log"
 Write-Host "Para parar o runtime no Pi: ssh $target 'kill `$(cat ~/CTRL-Lab/ctrlab_runtime.pid)'"
 Write-Host "Feche as janelas do dashboard e do tunel SSH quando terminar."

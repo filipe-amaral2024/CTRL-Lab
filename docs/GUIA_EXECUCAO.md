@@ -20,7 +20,91 @@ powershell -ExecutionPolicy Bypass -File .\start-ctrlab.ps1
 
 O script usa por padrão o usuário SSH `ctrl-lab` e o IP atual `192.168.15.75`. Após conectar, consulta `hostname -I` para mostrar os endereços atuais do Pi. Se o IP mudar, informe outro host pelo parâmetro `-RaspberryHost`, por exemplo `.\start-ctrlab.ps1 -RaspberryHost 192.168.15.80`. Na primeira execução, se ainda não houver a chave de automação no Pi, o script cria uma chave Ed25519 local protegida pela conta do Windows e solicita a senha SSH uma vez para instalar a chave pública; depois, SSH, SCP e o túnel reutilizam essa chave. O script nunca lê nem grava a senha. Se o Pi solicitar senha `sudo` para instalar pacotes de sistema, essa autenticação é separada. Ele cria um ambiente virtual local em `.venv`, instala as dependências no PC e no Raspberry Pi, copia os módulos Python necessários e abre janelas separadas para o dashboard e o túnel. Se houver um runtime CTRL-Lab anterior iniciado no mesmo diretório, ele o encerra graciosamente antes de iniciar outro; outros processos e runtimes de caminhos diferentes não são encerrados. Quando a página abrir, use no campo de controle o token que o script mostra no terminal.
 
-Por padrão inicia a **pré-visualização sem IA** (não detecta incêndio, fumaça ou EPI). Requer SSH e SCP do OpenSSH disponíveis no Windows, Python no PC, Mosquitto configurável por `sudo` no Pi, câmera conectada e portas locais 8000, 1884 e 8081 livres. O script não copia modelos ONNX, não salva tokens em arquivo e interrompe a inicialização se já encontrar outro runtime ativo. O runtime iniciado no Pi permanece rodando após fechar o script; pare-o com o comando que o script informa ou com `Ctrl+C` na sessão do Pi. Confira os logs se câmera ou sensores não estiverem disponíveis.
+Por padrão inicia a **pré-visualização sem IA** (não detecta incêndio, fumaça ou EPI). Requer SSH e SCP do OpenSSH disponíveis no Windows, Python no PC, Mosquitto configurável por `sudo` no Pi, câmera conectada e portas locais 8000, 1884 e 8081 livres. Sem parâmetros, o script não copia modelos ONNX e não salva tokens em arquivo. O runtime iniciado no Pi permanece rodando após fechar o script; pare-o com o comando que o script informa ou com `Ctrl+C` na sessão do Pi. Confira os logs se câmera ou sensores não estiverem disponíveis.
+
+Para iniciar a demonstração de pessoa/jaleco, forneça um modelo ONNX compatível no PC:
+
+```powershell
+.\start-ctrlab.ps1 -AccessModel .\models\person-lab-coat.onnx
+```
+
+O script copia esse arquivo para `~/CTRL-Lab/models/ctrlab-access.onnx` e inicia a visão sem exigir modelo visual de fogo/fumaça. O padrão existente continua sendo `person,lab_coat`. Para o dataset Roboflow Lab Coat Detection 3 v12, o perfil é `person_with_labcoat,person_without_labcoat`; as duas classes são aceitas como avaliação direta por pessoa. A ordem da lista precisa corresponder exatamente à saída do modelo. Exemplos:
+
+```powershell
+.\start-ctrlab.ps1 -AccessModel .\models\labcoat-v12.onnx -AccessClasses "person_with_labcoat,person_without_labcoat"
+```
+
+Com o stream da câmera habilitado, o vídeo é atualizado independentemente da inferência (pré-visualização nominal de 5 FPS). O intervalo padrão entre inferências é 1 segundo. As classificações por pessoa são acumuladas numa janela de 5 segundos; ao fim da janela, vence a classe mais frequente para cada pessoa rastreada pela sobreposição das caixas. O estado e as cores só mudam no fechamento de cada janela. Durante a primeira janela, as caixas aparecem em amarelo com `ANALISANDO`; as caixas classificadas expiram após 1,5 segundo sem uma nova detecção. A janela pode ser alterada com `--access-vote-window <segundos>`; use `0` para desativar a votação. A carga de CPU e o intervalo efetivo devem ser conferidos no Raspberry Pi. A pessoa sem jaleco continua gerando estado/alerta visual no dashboard, mas o buzzer físico toca somente em `EMERGENCY`.
+
+Para preparar os polígonos do dataset local como caixas delimitadoras para treinamento do detector YOLO, execute na raiz do repositório:
+
+```powershell
+python .\tools\prepare_labcoat_dataset.py
+```
+
+O conversor preserva a pasta original, valida os rótulos e cria `training/generated/labcoat-detection` com divisões de treino/validação/teste e `data.yaml`. Para treinar no Windows com uma GPU NVIDIA, use um ambiente virtual isolado com Python 3.14:
+
+```powershell
+$Python314Entry = py -0p | Select-String '3\.14' | Select-Object -First 1
+if (-not $Python314Entry) {
+    throw "Python 3.14 não encontrado. Instale-o antes de continuar."
+}
+$Python314 = ($Python314Entry.Line -split '\s+')[-1]
+$TrainEnv = Join-Path $env:LOCALAPPDATA 'CTRL-Lab\training-venv314'
+if (-not (Test-Path (Join-Path $TrainEnv 'Scripts\python.exe'))) {
+    & $Python314 -m venv $TrainEnv
+    if ($LASTEXITCODE -ne 0) {
+        throw "Falha ao criar o ambiente virtual de treinamento."
+    }
+}
+$TrainPython = Join-Path $TrainEnv 'Scripts\python.exe'
+$Yolo = Join-Path $TrainEnv 'Scripts\yolo.exe'
+& $TrainPython -m pip install --upgrade pip
+```
+
+O PyTorch instalado precisa incluir CUDA; ter apenas o driver da NVIDIA não transforma uma build `+cpu` em GPU. Instale o Ultralytics e os wheels CUDA 13.0 do PyTorch:
+
+```powershell
+& $TrainPython -m pip install `
+    ultralytics torch==2.14.1+cu130 torchvision==0.29.1+cu130 `
+    --index-url https://download.pytorch.org/whl/cu130 `
+    --extra-index-url https://pypi.org/simple
+```
+
+Nesta máquina, Python 3.15 com os wheels CUDA encerrou com erro nativo `0xC0000005` ao executar o backward. O mesmo teste e uma época diagnóstica do YOLO completaram no ambiente Python 3.14.5, com PyTorch 2.14.1+cu130 e RTX 5060. Por isso, use esse ambiente isolado de treinamento em vez do ambiente Python 3.15. Não é necessário instalar o CUDA Toolkit separadamente para estes wheels; mantenha o driver NVIDIA atualizado. Verifique a GPU antes do treino:
+
+```powershell
+& $TrainPython -c "import torch, torchvision; print('torch:', torch.__version__); print('torchvision:', torchvision.__version__); print('CUDA:', torch.version.cuda); print('disponível:', torch.cuda.is_available()); print('GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'indisponível')"
+```
+
+Continue somente se `torch.cuda.is_available()` for `True` e o nome exibido for a RTX 5060. Depois, treine com CUDA. Comece com `batch=4` para a placa de 8 GB e aumente somente se a memória permitir:
+
+```powershell
+& $Yolo detect train `
+    model=yolov8n.pt `
+    data=training\generated\labcoat-detection\data.yaml `
+    epochs=100 `
+    imgsz=640 `
+    batch=4 `
+    device=0 `
+    workers=0 `
+    patience=20 `
+    name=labcoat-v12-py314
+```
+
+Para avaliação e exportação:
+
+```powershell
+& $Yolo detect val model=runs/detect/labcoat-v12-py314/weights/best.pt data=training/generated/labcoat-detection/data.yaml split=test imgsz=640 device=0 workers=0 plots=True
+& $Yolo detect predict model=runs/detect/labcoat-v12-py314/weights/best.pt source="Lab Coat Detection 3.v12i.yolov8\test\images" imgsz=640 save=True name=labcoat-test-preview
+& $Yolo export model=runs/detect/labcoat-v12-py314/weights/best.pt format=onnx imgsz=320
+```
+
+O `data.yaml` gerado usa caminho absoluto para evitar que o Ultralytics resolva `path: .` em relação ao diretório atual do PowerShell. Se você mover o projeto ou regenerar o dataset em outro local, execute `python .\tools\prepare_labcoat_dataset.py` novamente para gerar um YAML com o caminho correto. Sem o argumento `project`, o Ultralytics salva por padrão em `runs\detect\labcoat-v12-py314`.
+
+Confira as métricas e amostras preditas no conjunto de teste antes de usar a saída exportada. Coloque o ONNX no PC e inicie com `-AccessClasses "person_with_labcoat,person_without_labcoat"`. O Ultralytics é usado somente para treinar/exportar; o runtime no Pi continua usando OpenCV DNN. Revise as obrigações da licença do Ultralytics e mantenha a atribuição CC BY 4.0 do dataset.
+
+O modelo de acesso inicia habilitado quando é o único modelo visual. O dashboard continua podendo pausá-lo ou reativá-lo. Os sensores físicos configurados no runtime permanecem ativos. O detector visual de fogo/fumaça é opcional; a lógica atual do software configura o MQ-2 como entrada digital, não como sensores separados de chama e fumaça.
 
 ## 1. O que será necessário
 
@@ -235,13 +319,13 @@ python -m central.dashboard `
   --camera-stream-url http://127.0.0.1:8081/video.mjpg
 ```
 
-Abra `http://127.0.0.1:8000` no navegador do PC e informe o token de controle na interface para habilitar o comando remoto. O dashboard deverá mostrar o estado MQTT, as leituras e o vídeo. O controle de acesso por dashboard só funciona se um serviço de visão estiver executando com `--safety-model` e, para habilitar a verificação de EPI, com `--access-model` compatível.
+Abra `http://127.0.0.1:8000` no navegador do PC e informe o token de controle na interface para habilitar o comando remoto. O dashboard deverá mostrar o estado MQTT, as leituras e o vídeo. O controle de pessoa/jaleco só fica disponível quando um `--access-model` compatível está configurado. O modelo visual de segurança é opcional.
 
 > Em versões antigas do PowerShell, ou se preferir evitar problemas de continuação de linha, execute o mesmo comando numa única linha. Passe os tokens como argumentos entre aspas usando `$env:NOME_DA_VARIAVEL`; variáveis não definidas, como `$Token`, fazem o programa reclamar que o argumento está faltando.
 
 O dashboard e o túnel acima ficam restritos ao PC local. Para abrir a interface a outros dispositivos da rede, isso exige uma decisão de rede/firewall consciente; não exponha o dashboard HTTP nem o broker MQTT à Internet.
 
-## 11. Execução com modelos ONNX (etapa posterior)
+## 11. Execução com modelos ONNX
 
 Os pesos ONNX não acompanham o repositório. Só avance quando tiver modelos treinados/exportados e compatíveis com o runtime e com as classes configuradas. No Raspberry, coloque os arquivos em um diretório de modelos e inicie com os caminhos reais:
 
@@ -249,12 +333,12 @@ Os pesos ONNX não acompanham o repositório. Só avance quando tiver modelos tr
 python -m raspberry_pi.main \
   --broker localhost \
   --camera-device 0 \
-  --safety-model models/ctrlab-safety.onnx \
   --access-model models/ctrlab-access.onnx \
+  --access-classes person,lab_coat \
   --camera-stream-token "$CTRL_LAB_CAMERA_TOKEN"
 ```
 
-Esse exemplo só funcionará quando ambos os arquivos existirem e forem compatíveis. O modelo de segurança deve usar as classes `smoke,fire`; o modelo de acesso deve corresponder a `person,lab_coat,trousers,closed_shoes,long_hair,tied_hair`, na ordem de saída do modelo. O acesso inicia desabilitado e pode ser alternado pelo atalho `A` no terminal ou pelo dashboard. Desabilitar o acesso não desativa a segurança contínua.
+O modelo de acesso pode ser executado sozinho com `person_with_labcoat,person_without_labcoat` ou com o perfil legado `person,lab_coat`. No primeiro perfil, cada pessoa é classificada diretamente; no legado, a caixa do jaleco é associada à caixa da pessoa. O acesso inicia habilitado nesse modo e pode ser pausado/reativado pelo atalho `A` ou pelo dashboard. Se também for fornecido `--safety-model models/ctrlab-safety.onnx --safety-classes smoke,fire`, o detector visual de segurança roda continuamente e o acesso inicia desabilitado. Em ambos os casos, sensores físicos e botões permanecem independentes dos modelos visuais.
 
 O modo ONNX usa `RaspberryVisionService`, com captura/inferência próprias em threads; portanto, não é o mesmo escalonamento cooperativo da pré-visualização sem IA. Meça comportamento e carga no Pi antes de deixar essa configuração em operação.
 

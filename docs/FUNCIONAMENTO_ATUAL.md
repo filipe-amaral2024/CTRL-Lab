@@ -2,7 +2,7 @@
 
 Este documento descreve o comportamento encontrado no código do repositório, distinguindo o que está implementado do que ainda depende de modelos, hardware e validação no Raspberry Pi. A arquitetura pretendida está descrita no [README principal](../README.md); este documento é a referência para o comportamento atual do runtime.
 
-> **Resumo importante:** o script `start-ctrlab.ps1` inicia o modo de pré-visualização sem IA. Nesse modo, a PS3 Eye conectada por USB ao Raspberry Pi transmite vídeo para o dashboard, mas não executa detecção de fogo, fumaça ou EPI. A inferência só é iniciada quando o runtime recebe pelo menos um modelo ONNX por argumento. O repositório não contém esses pesos.
+> **Resumo importante:** sem parâmetros adicionais, `start-ctrlab.ps1` inicia o modo de pré-visualização sem IA. Para a demonstração de jaleco, passe um ONNX por `-AccessModel`; o script copia o modelo ao Pi e inicia a análise de pessoa/jaleco sem exigir modelo visual de fogo/fumaça. O repositório não contém pesos treinados. Os sensores físicos existentes continuam trabalhando independentemente dos modelos visuais.
 
 ## 1. Visão do sistema
 
@@ -29,9 +29,9 @@ O endereço da câmera no dashboard não representa uma câmera conectada ao PC:
 | Simulação | `python -m raspberry_pi.main --mock` | Usa dados simulados e não exige sensores reais. Não comprova GPIO, DHT22, câmera ou rede física. | Não é o modo padrão do script. |
 | Teste de câmera | `python -m raspberry_pi.main --camera-test --camera-device 0 --camera-test-frames 30` | Abre a câmera, captura uma quantidade finita de frames, informa resolução observada e FPS medido e encerra sem iniciar o runtime de sensores/MQTT. | Deve ser executado separadamente para diagnóstico. |
 | Pré-visualização sem IA | Runtime com `--camera-stream-token`, sem `--safety-model` | Captura a câmera e serve MJPEG protegido; não classifica fogo, fumaça ou EPI. | **Modo iniciado por `start-ctrlab.ps1`.** |
-| Inferência visual | Runtime com `--safety-model`; opcionalmente `--access-model` e token de câmera | Executa o modelo de segurança e pode executar o modelo de acesso/EPI. | Implementado no código, mas não ativado pelo script padrão e dependente de pesos ONNX externos. |
+| Inferência visual | Runtime com `--access-model` e/ou `--safety-model` | Pessoa/jaleco pode rodar sozinho; detector visual de fogo/fumaça é opcional. | Implementado no código; depende de pesos ONNX externos. |
 
-O modo padrão do inicializador prepara dependências, sincroniza o código, prepara o runtime do Raspberry, cria túneis e abre o dashboard. Ele não envia pesos de modelos e não fornece `--safety-model`. A mensagem “dashboard funcionando” ou a imagem ao vivo, portanto, não significa que a visão computacional esteja analisando a cena.
+Sem `-AccessModel`, o inicializador não envia pesos e não executa inferência visual. Com `-AccessModel <arquivo.onnx>`, ele valida e copia o modelo para `~/CTRL-Lab/models/ctrlab-access.onnx`, iniciando a verificação de jaleco. A mensagem “dashboard funcionando” ou a imagem ao vivo, por si só, não significa que exista inferência visual.
 
 ## 3. Inicialização automatizada no Windows
 
@@ -77,9 +77,9 @@ Os 24 FPS são um pedido ao driver, não uma taxa garantida ou uma medição. O 
 
 O serviço de visão abre uma captura única e compartilha os frames entre os detectores. Com token de pré-visualização habilitado, uma thread de captura mantém o frame mais recente disponível para inferência; a prévia JPEG é atualizada aproximadamente a cada 0,2 s (alvo de 5 FPS). A inferência lê um frame recente, executa o detector de segurança e, se o acesso estiver habilitado, executa também o detector de acesso sobre esse frame.
 
-O intervalo padrão entre ciclos de inferência é **3 segundos**. É um intervalo mínimo entre ciclos, não uma garantia de execução nesse ritmo: a inferência pode demorar mais. A câmera pode capturar muitos frames entre inferências; o modelo não processa necessariamente cada frame mostrado na interface.
+O intervalo padrão entre ciclos de inferência é **1 segundo** (`--inference-interval`); é um intervalo mínimo entre ciclos, não uma garantia de execução nesse ritmo, pois a inferência pode demorar mais. O stream mantém pré-visualização nominal de 5 FPS sem executar inferência em cada frame. Para pessoa/jaleco, os resultados são agrupados em janelas de votação de **5 segundos** (`--access-vote-window`): as caixas são associadas entre inferências por IoU, cada pessoa recebe sua classe mais frequente ao fim da janela e o estado de acesso só muda nesse fechamento. Durante a primeira janela, a pessoa aparece como `ANALISANDO`; use `--access-vote-window 0` para desativar a estabilização.
 
-O modelo de acesso começa desabilitado. Se tiver sido configurado por `--access-model`, pode ser alternado pela tecla `A` no terminal interativo ou pelo comando MQTT enviado pelo dashboard. A tecla e o controle remoto não desligam o detector de segurança.
+Quando executado sozinho, o modelo de pessoa/jaleco começa habilitado; o dashboard ou a tecla `A` pode pausá-lo/reativá-lo. Se segurança e acesso forem configurados juntos, o detector de segurança roda continuamente e o modelo de acesso começa desabilitado. O controle do acesso nunca desliga o detector de segurança.
 
 ## 5. Sensores e GPIO
 
@@ -88,7 +88,7 @@ Configuração padrão declarada em `raspberry_pi/config.py`:
 | Componente | GPIO BCM | Funcionamento atual |
 |---|---:|---|
 | DHT22 | 17 | Temperatura/umidade; consultado a cada 5 s por padrão, com mínimo efetivo de 2 s. |
-| Saída digital DO do MQ-2 | 5 | Estado digital do comparador. Polaridade padrão ativa em LOW; `--mq2-active-high` inverte. Não mede ppm. |
+| Saída digital DO do MQ-2 | 5 | Estado digital do comparador. Polaridade padrão ativa em LOW; `--mq2-active-high` inverte. Sinaliza o limiar configurado no módulo; não mede ppm. |
 | Botão de emergência | 6 | Entrada com pull-up; pressão é identificada por evento GPIO. |
 | Botão de reset | 13 | Entrada com pull-up; pressão é identificada por evento GPIO. |
 | Buzzer | 23 | Ligado em `WARNING`/`ALERT`; desligado em `NORMAL` e `EMERGENCY`. |
@@ -107,7 +107,7 @@ O `AlertManager` combina entradas ambientais e, quando existe inferência, o est
 - **ALERT**: temperatura igual/superior a 30 °C ou umidade igual/superior a 70%.
 - **EMERGENCY**: botão de emergência, estado digital de gás detectado, fumaça/incêndio reportado ou outra condição classificada como emergência.
 - A emergência fica travada até o botão mecânico ser liberado e um reset ser solicitado. Com visão configurada, a câmera/visão volta para confirmar condição segura antes de liberar o estado. Sem visão, o software só pode revalidar entradas disponíveis; não existe confirmação visual.
-- Enquanto a emergência está travada, a câmera/visão é pausada e o buzzer é desligado. O processo, MQTT e a leitura de sensores/botões permanecem ativos para monitoramento e reset.
+- Enquanto a emergência está travada, a câmera/visão é pausada e o buzzer permanece acionado. O processo, MQTT e a leitura de sensores/botões permanecem ativos para monitoramento e reset. Nos estados WARNING/ALERT, inclusive alerta de pessoa sem jaleco, o buzzer fica desligado.
 
 Essa lógica é uma resposta de software de protótipo. Não é uma parada de emergência certificada nem substitui alarmes, proteções ou procedimentos de segurança do laboratório.
 
@@ -131,18 +131,45 @@ O código executa YOLOv8 exportado para ONNX usando OpenCV DNN no alvo CPU. O de
 
 Valores padrão do CLI:
 
-- Segurança: classes `smoke,fire`; thresholds de classificação em `FireDetector` de 0,45 para fumaça e 0,35 para fogo.
-- Acesso: classes `person,lab_coat,trousers,closed_shoes,long_hair,tied_hair`.
+- Segurança visual (opcional): classes `smoke,fire`; thresholds de classificação em `FireDetector` de 0,45 para fumaça e 0,35 para fogo.
+- Pessoa/jaleco: perfil legado `person,lab_coat` ou perfil direto `person_with_labcoat,person_without_labcoat`; somente o status do jaleco é avaliado.
 - Entrada do modelo: 320×320 (`--image-size 320`).
-- Intervalo entre ciclos: 3 s (`--inference-interval 3`).
+- Intervalo entre ciclos: 1 s (`--inference-interval 1`).
+- Janela de votação temporal por pessoa: 5 s (`--access-vote-window 5`).
 - Limiar de confiança do detector ONNX: 0,25; NMS: 0,45.
-- A avaliação de EPI exige jaleco, calça e calçado fechado; cabelo comprido deve estar marcado como preso.
+- A avaliação do modo de demonstração exige jaleco; outros itens de EPI não são avaliados.
 
-Esses valores e caminhos preparam a infraestrutura; não comprovam acurácia. Os pesos treinados, compatibilidade de pré-processamento e classes, desempenho e qualidade das decisões ainda precisam ser medidos. **Nenhum arquivo `.onnx`, `.pt` ou `.tflite` foi encontrado no repositório na inspeção deste documento.**
+No perfil `person,lab_coat`, o código associa o centro da caixa do jaleco à caixa de uma pessoa. No novo perfil, cada caixa é classificada diretamente como pessoa com ou sem jaleco e qualquer detecção `person_without_labcoat` produz alerta. O perfil direto não depende de associar caixas separadas. Validar as detecções em imagens e no enquadramento real continua necessário. Os thresholds, pesos, compatibilidade de pré-processamento, desempenho e qualidade das decisões ainda precisam ser medidos. **Nenhum peso `.onnx`, `.pt` ou `.tflite` treinado está incluído no repositório.**
+
+O detector visual de fogo/fumaça pode ser adicionado depois ou junto do detector de jaleco. Sua ausência é exibida como não configurada e não desativa os sensores físicos. No código atual, o MQ-2 está configurado como uma entrada digital de gás/limiar; sensores físicos dedicados de chama ou fumaça precisam ter seus pinos e lógica integrados antes de aparecerem como sinais próprios no status.
+
+### Dataset local: Lab Coat Detection 3 v12
+
+O dataset Roboflow foi adicionado localmente em `Lab Coat Detection 3.v12i.yolov8`. O YAML declara as classes `person_with_labcoat` e `person_without_labcoat`, licença CC BY 4.0 e divisões de treino, validação e teste. O `data.yaml` original foi ajustado para apontar para as pastas de imagens existentes dentro do dataset.
+
+As anotações exportadas são segmentações poligonais, enquanto o runtime atual executa detecção de caixas YOLOv8. O utilitário `tools/prepare_labcoat_dataset.py` converte os polígonos em caixas delimitadoras e prepara uma cópia em `training/generated/labcoat-detection`, sem alterar as anotações originais. O modelo foi treinado e avaliado localmente no split de teste; seus arquivos estão em `runs/detect/labcoat-v12-py314/weights/` e são ignorados pelo Git. O runtime e o inicializador aceitam as duas classes de status. **A validação no Raspberry Pi e com imagens reais da PS3 Eye continuam pendentes**; a qualidade das anotações e a capacidade de generalização devem ser verificadas em condições do ambiente de demonstração.
+
+O dataset não é o mesmo que o workflow hospedado `general-segmentation-api` mencionado anteriormente. Ainda não foi confirmado que esse workflow usa esta versão do dataset. A validação local descrita aqui não exige API nem credencial.
+
+Na apresentação e no relatório, cite a origem sob a licença indicada pelo export:
+
+```bibtex
+@misc{lab-coat-detection-3-v12,
+  title = {Lab Coat Detection 3 Dataset},
+  type = {Open Source Dataset},
+  author = {Lab Coat Detection},
+  howpublished = {\url{https://universe.roboflow.com/lab-coat-detection/lab-coat-detection-3/dataset/12}},
+  url = {https://universe.roboflow.com/lab-coat-detection/lab-coat-detection-3/dataset/12},
+  journal = {Roboflow Universe},
+  publisher = {Roboflow},
+  year = {2026},
+  note = {Versão 12, exportada em 2026-06-29; licença CC BY 4.0}
+}
+```
 
 ## 9. Testes e limites conhecidos
 
-Os testes automatizados verificam componentes com mocks: sensores, GPIO, MQTT, câmera/stream, lógica de estados, dashboard, eventos e processamento ONNX. A última execução completa reportada no ambiente local passou **83 testes**.
+Os testes automatizados verificam componentes com mocks: sensores, GPIO, MQTT, câmera/stream, lógica de estados, dashboard, eventos, processamento ONNX e conversão do dataset. A suíte completa passou **97 testes** após as alterações para as classes pessoa-com/sem-jaleco.
 
 Esses testes não substituem validação no hardware. Eles não demonstram por si só:
 

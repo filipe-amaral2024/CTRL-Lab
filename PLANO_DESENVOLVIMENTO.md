@@ -1,5 +1,7 @@
 # Plano de Desenvolvimento — CRTL-Lab
 
+> Este plano registra a arquitetura original, mais ampla. Para a demonstração atual, o foco foi reduzido a pessoa/jaleco por visão; segurança visual de fogo/fumaça é opcional e os sensores físicos permanecem independentes. Consulte [documentação do funcionamento e pendências](docs/FUNCIONAMENTO_ATUAL.md).
+
 ## 1. Objetivo do plano
 
 Este documento define a sequência de desenvolvimento do CRTL-Lab, priorizando primeiro a construção de uma versão mínima funcional e, posteriormente, a integração dos módulos.

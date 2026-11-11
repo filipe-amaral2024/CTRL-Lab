@@ -1,0 +1,13 @@
+train: train/images
+val: valid/images
+test: test/images
+
+nc: 2
+names: ['person_with_labcoat', 'person_without_labcoat']
+
+roboflow:
+  workspace: lab-coat-detection
+  project: lab-coat-detection-3
+  version: 12
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/lab-coat-detection/lab-coat-detection-3/dataset/12
