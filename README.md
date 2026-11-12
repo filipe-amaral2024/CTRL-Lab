@@ -6,7 +6,7 @@ O **CTRL-Lab** é um protótipo acadêmico de controle de acesso e monitoramento
 
 A proposta combina **visão computacional, inteligência artificial, sensores ambientais e automação** para auxiliar na prevenção e identificação de situações de risco em um laboratório.
 
-O desenho previsto usa uma câmera **PS3 Eye** conectada por USB ao Raspberry Pi, sensores ambientais e inferência local. O código contém a infraestrutura para esses módulos, mas o modo iniciado por `start-ctrlab.ps1` atualmente é **pré-visualização sem IA**: transmite a câmera, sem detectar fogo, fumaça ou EPI. A inferência exige arquivos ONNX compatíveis, que não estão incluídos no repositório, e a integração física ainda precisa ser validada no Pi. Consulte [Funcionamento atual](docs/FUNCIONAMENTO_ATUAL.md) para distinguir o comportamento implementado do objetivo do projeto, e [Pendências para concluir](docs/PENDENCIAS_CONCLUSAO.md) para o checklist de demonstração.
+O projeto usa uma câmera **PS3 Eye** conectada por USB ao Raspberry Pi, sensores ambientais e inferência local. Sem parâmetros, `start-ctrlab.ps1` inicia **pré-visualização sem IA**. Um modelo de pessoa/jaleco foi treinado e avaliado localmente, mas os pesos ONNX ficam em `runs/` e não são versionados; forneça-os com `-AccessModel` para ativar a detecção. A integração física e o desempenho do modelo ainda precisam ser validados na montagem final do Pi. Consulte [Funcionamento atual](docs/FUNCIONAMENTO_ATUAL.md), [Apresentação do projeto](docs/APRESENTACAO_PROJETO.md) e [Pendências para concluir](docs/PENDENCIAS_CONCLUSAO.md).
 
 ---
 
@@ -415,7 +415,9 @@ Conecte a PS3 Eye ao Raspberry Pi e confirme o índice de dispositivo (padrão `
 
 #### Preparar o Raspberry Pi OS Lite 64-bit
 
-Para fazer a sincronização do código, instalação das dependências e inicialização automática do runtime com dashboard no Windows, use o [script de início automatizado](./start-ctrlab.ps1) conforme o [guia passo a passo](./docs/GUIA_EXECUCAO.md#início-automatizado-no-windows). O modo padrão é pré-visualização sem IA; modelos ONNX não são instalados pelo script.
+Para fazer a sincronização do código, instalação das dependências e inicialização automática do runtime com dashboard no Windows, use o [script de início automatizado](./start-ctrlab.ps1) conforme o [guia passo a passo](./docs/GUIA_EXECUCAO.md#início-automatizado-no-windows). Para uma conexão direta por cabo Ethernet sem alterar a rota de Internet, use [start-ctrlab-ethernet.ps1](./start-ctrlab-ethernet.ps1) após configurar os endereços estáticos sem gateway/DNS. O modo padrão é pré-visualização sem IA; modelos ONNX não são instalados pelo script.
+
+Para uma visão consolidada de escopo, arquitetura, sensores, estados, bibliotecas, modelo treinado e roteiro de demonstração, consulte [Apresentação do projeto](./docs/APRESENTACAO_PROJETO.md).
 
 Confirme que o sistema é 64-bit e registre a versão do Python antes de instalar dependências:
 

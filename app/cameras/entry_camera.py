@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 try:
     import cv2
@@ -50,6 +53,14 @@ class StreamCamera:
             self.last_error = f"Não foi possível abrir a fonte de vídeo: {source}"
             self.capture = None
             raise RuntimeError(self.last_error)
+
+        buffer_property = getattr(cv2, "CAP_PROP_BUFFERSIZE", None)
+        if buffer_property is not None and not self.capture.set(buffer_property, 1):
+            self.last_error = (
+                "O backend da câmera não aceitou buffer de um frame; "
+                "a pré-visualização pode apresentar atraso."
+            )
+            logger.warning("%s", self.last_error)
 
         self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, self.config.width)
         self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, self.config.height)

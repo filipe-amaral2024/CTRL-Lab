@@ -20,6 +20,43 @@ powershell -ExecutionPolicy Bypass -File .\start-ctrlab.ps1
 
 O script usa por padrão o usuário SSH `ctrl-lab` e o IP atual `192.168.15.75`. Após conectar, consulta `hostname -I` para mostrar os endereços atuais do Pi. Se o IP mudar, informe outro host pelo parâmetro `-RaspberryHost`, por exemplo `.\start-ctrlab.ps1 -RaspberryHost 192.168.15.80`. Na primeira execução, se ainda não houver a chave de automação no Pi, o script cria uma chave Ed25519 local protegida pela conta do Windows e solicita a senha SSH uma vez para instalar a chave pública; depois, SSH, SCP e o túnel reutilizam essa chave. O script nunca lê nem grava a senha. Se o Pi solicitar senha `sudo` para instalar pacotes de sistema, essa autenticação é separada. Ele cria um ambiente virtual local em `.venv`, instala as dependências no PC e no Raspberry Pi, copia os módulos Python necessários e abre janelas separadas para o dashboard e o túnel. Se houver um runtime CTRL-Lab anterior iniciado no mesmo diretório, ele o encerra graciosamente antes de iniciar outro; outros processos e runtimes de caminhos diferentes não são encerrados. Quando a página abrir, use no campo de controle o token que o script mostra no terminal.
 
+### Conexão direta por cabo Ethernet
+
+Para testar sem depender da rede Wi-Fi/dados móveis, conecte o notebook diretamente ao Pi por Ethernet e configure endereços IPv4 estáticos **sem gateway nem DNS**:
+
+- Notebook, na interface Ethernet conectada ao Pi: `192.168.50.1`, máscara `255.255.255.0`.
+- Raspberry Pi, na interface `eth0`: `192.168.50.2/24`.
+- Wi-Fi permanece inalterado e continua sendo a rota de Internet do notebook.
+
+No Raspberry Pi OS Lite, descubra o nome do perfil Ethernet com `nmcli connection show` e configure esse perfil (ajuste o nome se não for `Wired connection 1`):
+
+```bash
+sudo nmcli connection modify "Wired connection 1" \
+  ipv4.method manual \
+  ipv4.addresses 192.168.50.2/24 \
+  ipv4.gateway "" \
+  ipv4.dns "" \
+  ipv4.never-default yes
+sudo nmcli connection up "Wired connection 1"
+```
+
+No Windows, abra as propriedades IPv4 da interface Ethernet correspondente e configure `192.168.50.1` com máscara `255.255.255.0`; deixe gateway e DNS vazios. Não altere a interface Wi-Fi. Se a interface se chamar diferente, passe o nome ao script.
+
+O [inicializador Ethernet](../start-ctrlab-ethernet.ps1) **não modifica endereços, gateways, DNS nem rotas**. Ele confirma que a interface selecionada está conectada, tem `192.168.50.1/24`, não possui rota padrão e alcança o SSH do Pi pelo enlace local; então chama o inicializador padrão usando `192.168.50.2`. Execute:
+
+```powershell
+.\start-ctrlab-ethernet.ps1 `
+    -AccessModel .\runs\detect\labcoat-v12-py314\weights\best.onnx
+```
+
+Se necessário, informe a interface Ethernet:
+
+```powershell
+.\start-ctrlab-ethernet.ps1 -EthernetInterfaceAlias "Ethernet 2"
+```
+
+Essa configuração mantém a Internet no Wi-Fi; o cabo é usado somente para SSH, MQTT e vídeo entre notebook e Pi. Se `nmcli` não estiver disponível no Pi, configure o perfil Ethernet do Raspberry OS pelo gerenciador de rede instalado antes de rodar o inicializador.
+
 Por padrão inicia a **pré-visualização sem IA** (não detecta incêndio, fumaça ou EPI). Requer SSH e SCP do OpenSSH disponíveis no Windows, Python no PC, Mosquitto configurável por `sudo` no Pi, câmera conectada e portas locais 8000, 1884 e 8081 livres. Sem parâmetros, o script não copia modelos ONNX e não salva tokens em arquivo. O runtime iniciado no Pi permanece rodando após fechar o script; pare-o com o comando que o script informa ou com `Ctrl+C` na sessão do Pi. Confira os logs se câmera ou sensores não estiverem disponíveis.
 
 Para iniciar a demonstração de pessoa/jaleco, forneça um modelo ONNX compatível no PC:
